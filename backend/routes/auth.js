@@ -32,15 +32,13 @@ const generateTokens = (user) => {
 };
 
 // ─── REGISTER ────────────────────────────────────────────────
-// POST /api/auth/register
 router.post(
   "/register",
   [
     body("full_name").trim().notEmpty().withMessage("Full name is required"),
     body("email").isEmail().normalizeEmail().withMessage("Valid email required"),
     body("password")
-      .isLength({ min: 8 })
-      .withMessage("Password must be at least 8 characters")
+      .isLength({ min: 8 }).withMessage("Password must be at least 8 characters")
       .matches(/[A-Z]/).withMessage("Password must contain an uppercase letter")
       .matches(/[0-9]/).withMessage("Password must contain a number"),
     body("department").optional().trim(),
@@ -54,8 +52,9 @@ router.post(
     const { full_name, email, password, department } = req.body;
 
     try {
-      // Check duplicate email
-      const [existing] = await db.query("SELECT id FROM users WHERE email = ?", [email]);
+      const [existing] = await db.query(
+        "SELECT id FROM users WHERE email = ?", [email]
+      );
       if (existing.length > 0) {
         return res.status(409).json({ success: false, message: "Email already registered" });
       }
@@ -63,14 +62,12 @@ router.post(
       const password_hash = await bcrypt.hash(password, 10);
       const id = uuidv4();
 
-      // Default role_id = 3 (Employee)
       await db.query(
         `INSERT INTO users (id, full_name, email, password_hash, role_id, department)
          VALUES (?, ?, ?, ?, 3, ?)`,
         [id, full_name, email, password_hash, department || null]
       );
 
-      // Log activity
       await db.query(
         `INSERT INTO activity_logs (id, user_id, action, new_value)
          VALUES (UUID(), ?, 'USER_REGISTERED', ?)`,
@@ -89,7 +86,6 @@ router.post(
 );
 
 // ─── LOGIN ────────────────────────────────────────────────────
-// POST /api/auth/login
 router.post(
   "/login",
   [
@@ -105,23 +101,42 @@ router.post(
     const { email, password } = req.body;
 
     try {
+      // Fetch user + role name
       const [rows] = await db.query(
-        `SELECT u.*, r.name AS role_name
+        `SELECT u.id, u.full_name, u.email, u.password_hash,
+                u.role_id, u.department, u.avatar_url, u.is_active,
+                r.name AS role_name
          FROM users u
          JOIN roles r ON u.role_id = r.id
-         WHERE u.email = ? AND u.is_active = 1`,
+         WHERE u.email = ?`,
         [email]
       );
 
+      // User not found
       if (rows.length === 0) {
-        return res.status(401).json({ success: false, message: "Invalid email or password" });
+        return res.status(401).json({
+          success: false,
+          message: "Invalid email or password",
+        });
       }
 
       const user = rows[0];
-      const passwordMatch = await bcrypt.compare(password, user.password_hash);
 
+      // Account disabled
+      if (!user.is_active) {
+        return res.status(403).json({
+          success: false,
+          message: "Account is disabled. Contact your administrator.",
+        });
+      }
+
+      // Wrong password
+      const passwordMatch = await bcrypt.compare(password, user.password_hash);
       if (!passwordMatch) {
-        return res.status(401).json({ success: false, message: "Invalid email or password" });
+        return res.status(401).json({
+          success: false,
+          message: "Invalid email or password",
+        });
       }
 
       const { accessToken, refreshToken } = generateTokens(user);
@@ -134,13 +149,16 @@ router.post(
       );
 
       // Update last login
-      await db.query(`UPDATE users SET last_login = NOW() WHERE id = ?`, [user.id]);
+      await db.query(
+        `UPDATE users SET last_login = NOW() WHERE id = ?`,
+        [user.id]
+      );
 
       // Log activity
       await db.query(
         `INSERT INTO activity_logs (id, user_id, action, ip_address)
          VALUES (UUID(), ?, 'USER_LOGIN', ?)`,
-        [user.id, req.ip]
+        [user.id, req.ip || "unknown"]
       );
 
       return res.status(200).json({
@@ -160,13 +178,15 @@ router.post(
       });
     } catch (err) {
       console.error("Login error:", err);
-      return res.status(500).json({ success: false, message: "Server error" });
+      return res.status(500).json({
+        success: false,
+        message: "Server error. Check your database connection.",
+      });
     }
   }
 );
 
 // ─── REFRESH TOKEN ────────────────────────────────────────────
-// POST /api/auth/refresh
 router.post("/refresh", async (req, res) => {
   const { refreshToken } = req.body;
   if (!refreshToken) {
@@ -186,7 +206,9 @@ router.post("/refresh", async (req, res) => {
     }
 
     const [rows] = await db.query(
-      `SELECT u.*, r.name AS role_name FROM users u JOIN roles r ON u.role_id = r.id WHERE u.id = ?`,
+      `SELECT u.*, r.name AS role_name
+       FROM users u JOIN roles r ON u.role_id = r.id
+       WHERE u.id = ?`,
       [decoded.id]
     );
 
@@ -211,7 +233,6 @@ router.post("/refresh", async (req, res) => {
 });
 
 // ─── LOGOUT ───────────────────────────────────────────────────
-// POST /api/auth/logout
 router.post("/logout", verifyToken, async (req, res) => {
   const { refreshToken } = req.body;
   if (refreshToken) {
@@ -221,12 +242,11 @@ router.post("/logout", verifyToken, async (req, res) => {
 });
 
 // ─── GET CURRENT USER ─────────────────────────────────────────
-// GET /api/auth/me
 router.get("/me", verifyToken, async (req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT u.id, u.full_name, u.email, u.department, u.avatar_url, u.last_login, u.created_at,
-              r.name AS role, r.id AS role_id
+      `SELECT u.id, u.full_name, u.email, u.department, u.avatar_url,
+              u.last_login, u.created_at, r.name AS role, r.id AS role_id
        FROM users u
        JOIN roles r ON u.role_id = r.id
        WHERE u.id = ? AND u.is_active = 1`,
@@ -239,6 +259,7 @@ router.get("/me", verifyToken, async (req, res) => {
 
     return res.json({ success: true, user: rows[0] });
   } catch (err) {
+    console.error("Me error:", err);
     return res.status(500).json({ success: false, message: "Server error" });
   }
 });
