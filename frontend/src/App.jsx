@@ -1,4 +1,3 @@
-
 import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
@@ -9,6 +8,8 @@ import TicketListPage     from "./pages/TicketListPage";
 import CreateTicketPage   from "./pages/CreateTicketPage";
 import TicketDetailPage   from "./pages/TicketDetailPage";
 import ManagerDashboard   from "./pages/ManagerDashboard";
+import TicketHistoryPage  from "./pages/TicketHistoryPage";
+import ActivityLogsPage   from "./pages/ActivityLogsPage";
 
 function PrivateRoute({ children, roles }) {
   const { user, loading } = useAuth();
@@ -48,6 +49,16 @@ export default function App() {
           <Route path="/manager"   element={
             <PrivateRoute roles={["Manager","Admin"]}>
               <ManagerDashboard />
+            </PrivateRoute>
+          } />
+          <Route path="/history"   element={
+            <PrivateRoute roles={["Admin","Manager"]}>
+              <TicketHistoryPage />
+            </PrivateRoute>
+          } />
+          <Route path="/activity"  element={
+            <PrivateRoute roles={["IT Support Agent","Admin","Manager"]}>
+              <ActivityLogsPage />
             </PrivateRoute>
           } />
           <Route path="*" element={<Navigate to="/login" replace />} />

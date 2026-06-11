@@ -13,7 +13,7 @@ export default function ManagerDashboard() {
   const [workload,    setWorkload]    = useState([]);
   const [unassigned,  setUnassigned]  = useState([]);
   const [loading,     setLoading]     = useState(true);
-  const [assigning,   setAssigning]   = useState(null);  // ticket id being assigned
+  const [assigning,   setAssigning]   = useState(null);
   const [selectedAgent, setSelectedAgent] = useState({});
   const [assignNote,  setAssignNote]  = useState({});
   const [error,       setError]       = useState("");
@@ -44,13 +44,21 @@ export default function ManagerDashboard() {
       });
       setSuccess("Ticket assigned successfully");
       setTimeout(() => setSuccess(""), 3000);
-      fetchData(); // refresh
+      fetchData();
     } catch (e) {
       setError(e.response?.data?.message || "Assignment failed");
     } finally { setAssigning(null); }
   };
 
   const maxTickets = Math.max(...workload.map(a => a.active_count || 0), 1);
+
+  const navLinks = [
+    ["Dashboard",    "/dashboard"],
+    ["Tickets",      "/tickets"],
+    ["📝 Activity",  "/activity"],
+    ["Team Overview","/manager"],
+    ["🔍 History",   "/history"],
+  ];
 
   return (
     <div style={s.root}>
@@ -62,10 +70,10 @@ export default function ManagerDashboard() {
             <span style={s.logoText}>HelpDesk</span>
           </div>
           <nav style={s.nav}>
-            {[["Dashboard","/dashboard"],["Tickets","/tickets"],["Team Overview","/manager"]].map(([label,path]) => (
+            {navLinks.map(([label, path]) => (
               <button key={label} onClick={() => navigate(path)}
-                style={{ ...s.navBtn, color: window.location.pathname===path ? "#fff":"#6666aa",
-                  background: window.location.pathname===path ? "rgba(255,255,255,0.08)":"none" }}>
+                style={{ ...s.navBtn, color: window.location.pathname === path ? "#fff" : "#6666aa",
+                  background: window.location.pathname === path ? "rgba(255,255,255,0.08)" : "none" }}>
                 {label}
               </button>
             ))}
@@ -84,14 +92,17 @@ export default function ManagerDashboard() {
             <h1 style={s.title}>Team Overview</h1>
             <p style={s.sub}>Agent workload, unassigned tickets, and assignment management</p>
           </div>
-          <button style={s.refreshBtn} onClick={fetchData}>↻ Refresh</button>
+          <div style={{ display:"flex", gap:8 }}>
+            <button style={s.historyBtn} onClick={() => navigate("/history")}>🔍 View History</button>
+            <button style={s.refreshBtn} onClick={fetchData}>↻ Refresh</button>
+          </div>
         </div>
 
         {error   && <div style={s.errorBanner}>⚠️ {error}</div>}
         {success && <div style={s.successBanner}>✓ {success}</div>}
 
         <div style={s.grid}>
-          {/* ── Left: Agent Workload ── */}
+          {/* Agent Workload */}
           <div>
             <div style={s.sectionTitle}>
               👥 Agent Workload
@@ -125,13 +136,9 @@ export default function ManagerDashboard() {
                         <div style={s.agentDept}>{agent.department || "IT"}</div>
                       </div>
                     </div>
-
-                    {/* Workload bar */}
                     <div style={s.barWrap}>
                       <div style={{ ...s.barFill, width:`${pct}%`, background:barColor }} />
                     </div>
-
-                    {/* Ticket counts */}
                     <div style={s.ticketCounts}>
                       {[
                         ["Open",        agent.open_count,        "#3b82f6"],
@@ -151,7 +158,7 @@ export default function ManagerDashboard() {
             </div>
           </div>
 
-          {/* ── Right: Unassigned Tickets ── */}
+          {/* Unassigned Tickets */}
           <div>
             <div style={s.sectionTitle}>
               🎫 Unassigned Tickets
@@ -172,12 +179,9 @@ export default function ManagerDashboard() {
               <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
                 {unassigned.map(ticket => {
                   const pc = PRIORITY_COLORS[ticket.priority] || "#888";
-                  const isOpen = assigning === ticket.id;
                   return (
                     <div key={ticket.id} style={s.unassignedCard}>
-                      {/* Ticket info */}
-                      <div style={s.unassignedHead}
-                        onClick={() => navigate(`/tickets/${ticket.id}`)}>
+                      <div style={s.unassignedHead} onClick={() => navigate(`/tickets/${ticket.id}`)}>
                         <div style={{ flex:1 }}>
                           <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:4 }}>
                             <span style={{ fontFamily:"monospace", fontSize:11, fontWeight:700, color:"#3b82f6" }}>
@@ -196,27 +200,21 @@ export default function ManagerDashboard() {
                         </div>
                         <span style={{ color:"#3b82f6", fontSize:16 }}>›</span>
                       </div>
-
-                      {/* Assign section */}
                       <div style={s.assignSection}>
-                        <select
-                          style={s.agentSelect}
+                        <select style={s.agentSelect}
                           value={selectedAgent[ticket.id] || ""}
                           onChange={e => setSelectedAgent(p => ({ ...p, [ticket.id]: e.target.value }))}>
                           <option value="">Select agent to assign...</option>
                           {workload.map(a => (
                             <option key={a.id} value={a.id}>
-                              {a.full_name} — {a.active_count} active ticket{a.active_count !== 1 ? "s" : ""}
-                              {a.active_count === 0 ? " ✓ Free" : ""}
+                              {a.full_name} — {a.active_count} active{a.active_count === 0 ? " ✓ Free" : ""}
                             </option>
                           ))}
                         </select>
-                        <input
-                          style={{ ...s.agentSelect, fontSize:11 }}
+                        <input style={{ ...s.agentSelect, fontSize:11 }}
                           placeholder="Optional note..."
                           value={assignNote[ticket.id] || ""}
-                          onChange={e => setAssignNote(p => ({ ...p, [ticket.id]: e.target.value }))}
-                        />
+                          onChange={e => setAssignNote(p => ({ ...p, [ticket.id]: e.target.value }))} />
                         <button
                           style={{ ...s.assignBtn, opacity: assigning === ticket.id ? 0.7 : 1 }}
                           disabled={!selectedAgent[ticket.id] || assigning === ticket.id}
@@ -254,6 +252,7 @@ const s = {
   pageHeader:    { display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:24 },
   title:         { fontSize:22, fontWeight:800, color:"#fff", letterSpacing:"-0.02em", marginBottom:4 },
   sub:           { fontSize:12, color:"#5555aa" },
+  historyBtn:    { background:"rgba(139,92,246,.15)", border:"1px solid rgba(139,92,246,.3)", borderRadius:8, padding:"8px 16px", color:"#a78bfa", fontSize:12, cursor:"pointer", fontWeight:600 },
   refreshBtn:    { background:"#1e1e2e", border:"1px solid #2a2a3a", borderRadius:8, padding:"8px 16px", color:"#8888bb", fontSize:12, cursor:"pointer" },
   errorBanner:   { background:"rgba(239,68,68,.1)", border:"1px solid rgba(239,68,68,.25)", borderRadius:8, padding:"9px 14px", color:"#fca5a5", fontSize:12, marginBottom:16 },
   successBanner: { background:"rgba(34,197,94,.1)", border:"1px solid rgba(34,197,94,.25)", borderRadius:8, padding:"9px 14px", color:"#86efac", fontSize:12, marginBottom:16 },
@@ -273,8 +272,7 @@ const s = {
   ticketCounts:  { display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:6 },
   countBox:      { background:"#16161f", borderRadius:8, padding:"8px", textAlign:"center" },
   unassignedCard:{ background:"#13131f", border:"1px solid rgba(255,255,255,0.07)", borderRadius:12, overflow:"hidden" },
-  unassignedHead:{ display:"flex", alignItems:"flex-start", gap:10, padding:"14px 16px", cursor:"pointer",
-    borderBottom:"1px solid rgba(255,255,255,0.06)", transition:"background .12s" },
+  unassignedHead:{ display:"flex", alignItems:"flex-start", gap:10, padding:"14px 16px", cursor:"pointer", borderBottom:"1px solid rgba(255,255,255,0.06)", transition:"background .12s" },
   categoryChip:  { fontSize:10, color:"#8888bb", background:"rgba(255,255,255,0.06)", padding:"1px 7px", borderRadius:5 },
   assignSection: { padding:"12px 16px", display:"flex", flexDirection:"column", gap:7 },
   agentSelect:   { width:"100%", background:"#16161f", border:"1px solid #2a2a3a", borderRadius:8, padding:"8px 10px", color:"#c0c0d0", fontSize:12, outline:"none", fontFamily:"inherit" },

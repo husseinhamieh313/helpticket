@@ -1,3 +1,4 @@
+const path = require("path");
 const express = require("express");
 const router = express.Router();
 const bcrypt = require("bcryptjs");
@@ -6,7 +7,7 @@ const { v4: uuidv4 } = require("uuid");
 const { body, validationResult } = require("express-validator");
 const db = require("../config/db");
 const { verifyToken } = require("../middleware/auth");
-require("dotenv").config();
+require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 
 // ─── Helper: generate tokens ───────────────────────────────
 const generateTokens = (user) => {

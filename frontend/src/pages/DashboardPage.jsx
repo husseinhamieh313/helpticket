@@ -9,13 +9,6 @@ const ROLE_ICONS  = { Admin:"🛡️", "IT Support Agent":"🔧", Employee:"👤
 const PRIORITY_COLORS = { Critical:"#ef4444", High:"#f59e0b", Medium:"#3b82f6", Low:"#6b7280" };
 const STATUS_COLORS   = { Open:"#3b82f6", "In Progress":"#f59e0b", Resolved:"#22c55e", Pending:"#6b7280", Closed:"#374151" };
 
-const NAV_ITEMS = [
-  { label:"Dashboard",     path:"/dashboard" },
-  { label:"Tickets",       path:"/tickets"   },
-  { label:"Reports",       path:"/reports"   },
-  { label:"Knowledge Base",path:"/kb"        },
-];
-
 const StatCard = ({ label, value, sub, icon, color, onClick }) => (
   <div onClick={onClick}
     style={{ background:"#1e1e2e", border:"1px solid rgba(255,255,255,0.07)", borderRadius:14,
@@ -69,15 +62,11 @@ export default function DashboardPage() {
       try {
         const res = await api.get("/tickets");
         const tickets = res.data.tickets || [];
-
-        // Compute stats from real data
         const open        = tickets.filter(t => t.status === "Open").length;
         const in_progress = tickets.filter(t => t.status === "In Progress").length;
         const resolved    = tickets.filter(t => t.status === "Resolved").length;
         const total       = tickets.length;
-
         setStats({ open, in_progress, resolved, total });
-        // Show 5 most recent
         setRecentTickets(tickets.slice(0, 5));
       } catch (err) {
         console.error("Dashboard fetch error:", err);
@@ -103,24 +92,36 @@ export default function DashboardPage() {
       { icon:"📊", label:"My performance",   desc:"Resolution stats",             color:"#22c55e", path:"/reports"     },
     ],
     Manager: [
+      { icon:"🔍", label:"Ticket History",   desc:"Full audit trail",             color:"#8b5cf6", path:"/history"     },
+      { icon:"👥", label:"Team Overview",    desc:"Monitor team workload",        color:"#3b82f6", path:"/manager"     },
       { icon:"📊", label:"Reports",          desc:"Team analytics & SLA",         color:"#f59e0b", path:"/reports"     },
-      { icon:"👥", label:"Team tickets",     desc:"Monitor team workload",        color:"#3b82f6", path:"/tickets"     },
-      { icon:"📈", label:"Agent performance",desc:"Resolution metrics",           color:"#8b5cf6", path:"/reports"     },
     ],
     Admin: [
       { icon:"📋", label:"All tickets",      desc:"View and manage all tickets",  color:"#3b82f6", path:"/tickets"     },
-      { icon:"👥", label:"Manage users",     desc:"Add, edit or deactivate users",color:"#8b5cf6", path:"/admin/users" },
+      { icon:"🔍", label:"Ticket History",   desc:"Full audit trail of all actions", color:"#8b5cf6", path:"/history"  },
       { icon:"📊", label:"Full reports",     desc:"All system analytics",         color:"#f59e0b", path:"/reports"     },
     ],
   };
 
   const actions      = quickActions[user?.role] || quickActions["Employee"];
   const canCreate    = ["Employee","IT Support Agent","Admin"].includes(user?.role);
+  const isAdminOrManager = ["Admin","Manager"].includes(user?.role);
   const greeting     = new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening";
+
+  const isAgent = user?.role === "IT Support Agent";
+  const canSeeActivity = ["IT Support Agent","Admin","Manager"].includes(user?.role);
+
+  const navItems = [
+    { label:"Dashboard",      path:"/dashboard" },
+    { label:"Tickets",        path:"/tickets"   },
+    ...(canSeeActivity ? [{ label:"📝 Activity", path:"/activity" }] : []),
+    ...(isAdminOrManager ? [{ label:"🔍 History", path:"/history" }] : []),
+    ...(isAdminOrManager ? [{ label:"Team Overview", path:"/manager" }] : []),
+  ];
 
   return (
     <div style={st.root}>
-      {/* ── Topbar ── */}
+      {/* Topbar */}
       <header style={st.topbar}>
         <div style={st.topbarLeft}>
           <div style={st.logo}>
@@ -128,7 +129,7 @@ export default function DashboardPage() {
             <span style={st.logoText}>HelpDesk</span>
           </div>
           <nav style={st.nav}>
-            {NAV_ITEMS.map(item => {
+            {navItems.map(item => {
               const active = location.pathname === item.path;
               return (
                 <button key={item.label}
@@ -156,9 +157,8 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {/* ── Main ── */}
+      {/* Main */}
       <main style={st.main}>
-        {/* Welcome row */}
         <div style={st.welcomeRow}>
           <div>
             <h1 style={st.welcomeTitle}>
@@ -176,7 +176,7 @@ export default function DashboardPage() {
           )}
         </div>
 
-        {/* Stats — clickable, navigate to /tickets with filter */}
+        {/* Stats */}
         <div style={st.statsGrid}>
           <StatCard label="Open tickets"   value={loading ? "…" : stats.open}
             sub="Awaiting action" icon="🔵" color="#3b82f6"

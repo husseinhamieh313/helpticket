@@ -28,10 +28,11 @@ export default function TicketListPage() {
   const [meta,     setMeta]     = useState({ categories:[], priorities:[], statuses:[] });
   const [deleting, setDeleting] = useState(null);
 
-  const canCreate = ["Employee","IT Support Agent","Admin"].includes(user?.role);
+  const role = user?.role;
+  const canCreate = ["Employee","IT Support Agent","Admin"].includes(role);
   const canDelete = (t) =>
-    user?.role === "Admin" ||
-    (user?.role === "Employee" && t.created_by_id === user.id && t.status === "Open");
+    role === "Admin" ||
+    (role === "Employee" && t.created_by_id === user.id && t.status === "Open");
 
   const fetchTickets = useCallback(async () => {
     setLoading(true);
@@ -64,14 +65,18 @@ export default function TicketListPage() {
     } finally { setDeleting(null); }
   };
 
+  const pageTitle = () => {
+    if (role === "Employee")         return "My Tickets";
+    if (role === "IT Support Agent") return "My Assigned Tickets";
+    return "All Tickets";
+  };
+
   return (
     <div style={s.root}>
       {/* Header */}
       <div style={s.header}>
         <div>
-          <h1 style={s.title}>
-            {user?.role === "Employee" ? "My Tickets" : "All Tickets"}
-          </h1>
+          <h1 style={s.title}>{pageTitle()}</h1>
           <p style={s.sub}>{tickets.length} ticket{tickets.length !== 1 ? "s" : ""} found</p>
         </div>
         {canCreate && (
@@ -121,7 +126,11 @@ export default function TicketListPage() {
             <div style={{ fontSize:32, marginBottom:10 }}>🎫</div>
             <div style={{ fontWeight:600, color:"var(--c-text)", marginBottom:6 }}>No tickets found</div>
             <div style={{ fontSize:12, color:"#5555aa" }}>
-              {canCreate ? "Create your first ticket to get started." : "No tickets match your filters."}
+              {role === "IT Support Agent"
+                ? "No tickets are assigned to you yet."
+                : canCreate
+                  ? "Create your first ticket to get started."
+                  : "No tickets match your filters."}
             </div>
           </div>
         ) : (
@@ -168,10 +177,7 @@ export default function TicketListPage() {
                   </td>
                   <td style={{ ...s.td }} onClick={e => e.stopPropagation()}>
                     <div style={{ display:"flex", gap:6 }}>
-                      <button style={s.iconBtn}
-                        onClick={() => navigate(`/tickets/${t.id}`)}>
-                        ✏️
-                      </button>
+                      <button style={s.iconBtn} onClick={() => navigate(`/tickets/${t.id}`)}>✏️</button>
                       {canDelete(t) && (
                         <button style={{ ...s.iconBtn, color:"#ef4444" }}
                           disabled={deleting === t.id}
@@ -211,9 +217,7 @@ const s = {
     letterSpacing:".06em", padding:"12px 14px", borderBottom:"1px solid rgba(255,255,255,0.06)" },
   tr:         { cursor:"pointer", transition:"background .12s" },
   td:         { padding:"11px 14px", borderBottom:"1px solid rgba(255,255,255,0.04)", verticalAlign:"middle" },
-  catBadge:   { fontSize:11, color:"#8888bb", background:"rgba(255,255,255,0.06)",
-    padding:"2px 8px", borderRadius:6 },
-  iconBtn:    { background:"none", border:"none", cursor:"pointer", fontSize:14, padding:"3px 5px",
-    borderRadius:6, lineHeight:1 },
+  catBadge:   { fontSize:11, color:"#8888bb", background:"rgba(255,255,255,0.06)", padding:"2px 8px", borderRadius:6 },
+  iconBtn:    { background:"none", border:"none", cursor:"pointer", fontSize:14, padding:"3px 5px", borderRadius:6, lineHeight:1 },
   empty:      { padding:"60px 20px", textAlign:"center", color:"#5555aa", fontSize:13 },
 };
