@@ -16,10 +16,77 @@ async function logHistory(ticketId, actorId, action, fieldName, oldVal, newVal, 
   );
 }
 
+// ─── HELPER: get notify targets ──────────────────────────────
+// Admin (role_id=1) + Manager (role_id=4) + assigned agent + ticket creator
+// Excludes the actor
+async function getNotifyTargets(ticketId, actorId) {
+  const [ticketRows] = await db.query(
+    `SELECT created_by, assigned_to FROM tickets WHERE id = ?`, [ticketId]
+  );
+  if (!ticketRows.length) return [];
+
+  const { created_by, assigned_to } = ticketRows[0];
+
+  const [staffRows] = await db.query(
+    `SELECT id FROM users WHERE role_id IN (1, 4) AND is_active = 1`
+  );
+
+  const targets = new Set(staffRows.map(r => r.id));
+  if (created_by)  targets.add(created_by);
+  if (assigned_to) targets.add(assigned_to);
+  targets.delete(actorId);
+
+  return [...targets];
+}
+
+// ─── HELPER: send notifications matching actual DB schema ─────
+// Schema: id, user_id, ticket_id, type, message, is_read, created_at  (NO title column)
+async function sendNotifications(ticketId, actorId, type, message) {
+  try {
+    const targets = await getNotifyTargets(ticketId, actorId);
+    for (const userId of targets) {
+      await db.query(
+        `INSERT INTO notifications (id, user_id, ticket_id, type, message, is_read, created_at)
+         VALUES (UUID(), ?, ?, ?, ?, 0, NOW())`,
+        [userId, ticketId, type, message]
+      );
+    }
+  } catch (err) {
+    console.error("Notification error:", err);
+  }
+}
+
+// ─── HELPER: staff-only notifications (excludes ticket creator) ──
+async function sendNotificationsStaffOnly(ticketId, actorId, type, message) {
+  try {
+    const [ticketRows] = await db.query(
+      `SELECT assigned_to FROM tickets WHERE id = ?`, [ticketId]
+    );
+    if (!ticketRows.length) return;
+
+    const { assigned_to } = ticketRows[0];
+
+    const [staffRows] = await db.query(
+      `SELECT id FROM users WHERE role_id IN (1, 4) AND is_active = 1`
+    );
+
+    const targets = new Set(staffRows.map(r => r.id));
+    if (assigned_to) targets.add(assigned_to);
+    targets.delete(actorId);
+
+    for (const userId of targets) {
+      await db.query(
+        `INSERT INTO notifications (id, user_id, ticket_id, type, message, is_read, created_at)
+         VALUES (UUID(), ?, ?, ?, ?, 0, NOW())`,
+        [userId, ticketId, type, message]
+      );
+    }
+  } catch (err) {
+    console.error("Notification error:", err);
+  }
+}
+
 // ─── GET ALL TICKETS ─────────────────────────────────────────
-// Employee  → only tickets they created
-// Agent     → only tickets assigned to them
-// Manager / Admin → all tickets
 router.get("/", async (req, res) => {
   try {
     const { status, priority, category, search } = req.query;
@@ -43,7 +110,6 @@ router.get("/", async (req, res) => {
       WHERE 1=1`;
     const params = [];
 
-    // Role-based visibility
     if (role === "Employee")         { query += " AND t.created_by = ?";   params.push(req.user.id); }
     if (role === "IT Support Agent") { query += " AND t.assigned_to = ?";  params.push(req.user.id); }
 
@@ -133,10 +199,7 @@ router.get("/history/all",
   }
 );
 
-// ─── GET ALL WORK LOGS (across all tickets) ──────────────────
-// Admin/Manager → see all logs
-// Agent         → see only their own logs
-// Employee      → blocked (403)
+// ─── GET ALL WORK LOGS ────────────────────────────────────────
 router.get("/worklogs/all", async (req, res) => {
   try {
     if (req.user.role === "Employee") {
@@ -153,7 +216,6 @@ router.get("/worklogs/all", async (req, res) => {
       WHERE 1=1`;
     const params = [];
 
-    // Agent sees only their own logs
     if (req.user.role === "IT Support Agent") {
       query += " AND wl.user_id = ?";
       params.push(req.user.id);
@@ -192,13 +254,11 @@ router.get("/:id", async (req, res) => {
     const ticket = rows[0];
     const role = req.user.role;
 
-    // Access control
     if (role === "Employee" && ticket.created_by_id !== req.user.id)
       return res.status(403).json({ success: false, message: "Access denied" });
     if (role === "IT Support Agent" && ticket.assigned_to_id !== req.user.id)
       return res.status(403).json({ success: false, message: "Access denied" });
 
-    // Comments
     const [comments] = await db.query(`
       SELECT tc.*, u.full_name AS author_name
       FROM ticket_comments tc
@@ -208,7 +268,6 @@ router.get("/:id", async (req, res) => {
       ORDER BY tc.created_at ASC`,
       [req.params.id, role]);
 
-    // Assignment history
     const [assignments] = await db.query(`
       SELECT ta.*,
              assignee.full_name AS assigned_to_name,
@@ -219,7 +278,6 @@ router.get("/:id", async (req, res) => {
       WHERE ta.ticket_id = ?
       ORDER BY ta.assigned_at DESC`, [req.params.id]);
 
-    // Work logs — only agents see work logs on a ticket; employees cannot
     let workLogs = [];
     if (role !== "Employee") {
       let wlQuery = `
@@ -238,7 +296,6 @@ router.get("/:id", async (req, res) => {
       workLogs = wl;
     }
 
-    // Ticket history — Admin/Manager only
     let ticketHistory = [];
     if (["Admin", "Manager"].includes(role)) {
       const [hist] = await db.query(`
@@ -288,6 +345,12 @@ router.post("/",
          VALUES (UUID(), ?, ?, 'TICKET_CREATED', ?)`,
         [req.user.id, id, JSON.stringify({ title, category_id, priority_id })]);
 
+      await sendNotifications(
+        id, req.user.id,
+        "ticket_created",
+        `New ticket by ${req.user.full_name}: "${title}"`
+      );
+
       const [rows] = await db.query(
         `SELECT t.*, c.name AS category, p.name AS priority, s.name AS status
          FROM tickets t
@@ -311,6 +374,7 @@ router.put("/:id", async (req, res) => {
       `SELECT t.*, s.name AS status_name,
               p.name AS priority_name,
               c.name AS category_name,
+              t.reference_no,
               assignee.full_name AS assigned_to_name
        FROM tickets t
        JOIN statuses   s ON t.status_id   = s.id
@@ -326,6 +390,8 @@ router.put("/:id", async (req, res) => {
     const ticket = rows[0];
     const isAssigned = !!ticket.assigned_to;
     const role = req.user.role;
+    const actorName = req.user.full_name;
+    const ref = ticket.reference_no || req.params.id;
 
     if (role === "Employee") {
       if (ticket.created_by !== req.user.id)
@@ -359,38 +425,64 @@ router.put("/:id", async (req, res) => {
       fields.push("description = ?"); vals.push(description);
     }
 
+    // ── Status change ──────────────────────────────────────────
+    let newStatusName;
     if (status_id && ["IT Support Agent","Manager","Admin"].includes(role)) {
       const [sRows] = await db.query("SELECT name FROM statuses WHERE id = ?", [status_id]);
-      const newStatusName = sRows[0]?.name;
-      if (newStatusName && newStatusName !== ticket.status_name)
+      newStatusName = sRows[0]?.name;
+      if (newStatusName && newStatusName !== ticket.status_name) {
         await logHistory(req.params.id, req.user.id, "STATUS_CHANGED", "status", ticket.status_name, newStatusName, null);
+        await sendNotifications(
+          req.params.id, req.user.id,
+          newStatusName === "Resolved" ? "ticket_resolved" : "status_changed",
+          `[${ref}] ${actorName} changed status: "${ticket.status_name}" → "${newStatusName}"`
+        );
+      }
       fields.push("status_id = ?"); vals.push(status_id);
       if (newStatusName === "Resolved") { fields.push("resolved_at = NOW()"); }
       else { fields.push("resolved_at = NULL"); }
     }
 
+    // ── Priority change ────────────────────────────────────────
     if (priority_id && ["IT Support Agent","Admin"].includes(role)) {
       const [pRows] = await db.query("SELECT name FROM priorities WHERE id = ?", [priority_id]);
       const newPriorityName = pRows[0]?.name;
-      if (newPriorityName && newPriorityName !== ticket.priority_name)
+      if (newPriorityName && newPriorityName !== ticket.priority_name) {
         await logHistory(req.params.id, req.user.id, "FIELD_CHANGED", "priority", ticket.priority_name, newPriorityName, null);
+        await sendNotifications(
+          req.params.id, req.user.id,
+          "ticket_updated",
+          `[${ref}] ${actorName} changed priority: "${ticket.priority_name}" → "${newPriorityName}"`
+        );
+      }
       fields.push("priority_id = ?"); vals.push(priority_id);
     }
 
+    // ── Category change ────────────────────────────────────────
     if (category_id && ["IT Support Agent","Admin"].includes(role)) {
       const [cRows] = await db.query("SELECT name FROM categories WHERE id = ?", [category_id]);
       const newCategoryName = cRows[0]?.name;
-      if (newCategoryName && newCategoryName !== ticket.category_name)
+      if (newCategoryName && newCategoryName !== ticket.category_name) {
         await logHistory(req.params.id, req.user.id, "FIELD_CHANGED", "category", ticket.category_name, newCategoryName, null);
+      }
       fields.push("category_id = ?"); vals.push(category_id);
     }
 
+    // ── Due date change ────────────────────────────────────────
     if (due_date && ["IT Support Agent","Manager","Admin"].includes(role)) {
       const oldDue = ticket.due_date ? ticket.due_date.toISOString().split("T")[0] : null;
-      if (due_date !== oldDue) await logHistory(req.params.id, req.user.id, "FIELD_CHANGED", "due_date", oldDue, due_date, null);
+      if (due_date !== oldDue) {
+        await logHistory(req.params.id, req.user.id, "FIELD_CHANGED", "due_date", oldDue, due_date, null);
+        await sendNotifications(
+          req.params.id, req.user.id,
+          "ticket_updated",
+          `[${ref}] ${actorName} set due date to ${due_date}`
+        );
+      }
       fields.push("due_date = ?"); vals.push(due_date);
     }
 
+    // ── Assignment ─────────────────────────────────────────────
     if (assigned_to !== undefined && ["IT Support Agent","Manager","Admin"].includes(role)) {
       const newAssignee = assigned_to || null;
       fields.push("assigned_to = ?"); vals.push(newAssignee);
@@ -406,6 +498,12 @@ router.put("/:id", async (req, res) => {
         await logHistory(req.params.id, req.user.id, "ASSIGNED", "assigned_to",
           ticket.assigned_to_name || "Unassigned", newAssigneeName, req.body.note || null);
 
+        await sendNotifications(
+          req.params.id, req.user.id,
+          "ticket_assigned",
+          `[${ref}] ${actorName} assigned this ticket to ${newAssigneeName}`
+        );
+
         const [curStatus] = await db.query(
           "SELECT name FROM statuses s JOIN tickets t ON t.status_id=s.id WHERE t.id=?", [req.params.id]);
         if (curStatus[0]?.name === "Open") {
@@ -415,6 +513,11 @@ router.put("/:id", async (req, res) => {
       } else {
         await logHistory(req.params.id, req.user.id, "UNASSIGNED", "assigned_to",
           ticket.assigned_to_name || "Unknown", "Unassigned", null);
+        await sendNotifications(
+          req.params.id, req.user.id,
+          "ticket_updated",
+          `[${ref}] ${actorName} removed the assignee from this ticket`
+        );
       }
     }
 
@@ -496,9 +599,12 @@ router.post("/:id/comments",
       const role = req.user.role;
       const internal = role !== "Employee" ? is_internal : false;
 
-      const [ticket] = await db.query("SELECT id FROM tickets WHERE id = ?", [req.params.id]);
-      if (ticket.length === 0)
+      const [ticketRows] = await db.query(
+        "SELECT id, reference_no FROM tickets WHERE id = ?", [req.params.id]);
+      if (ticketRows.length === 0)
         return res.status(404).json({ success: false, message: "Ticket not found" });
+
+      const ref = ticketRows[0].reference_no || req.params.id;
 
       const commentId = uuidv4();
       await db.query(
@@ -509,6 +615,20 @@ router.post("/:id/comments",
       await logHistory(req.params.id, req.user.id,
         internal ? "INTERNAL_NOTE_ADDED" : "COMMENT_ADDED",
         null, null, commentBody.substring(0, 200), internal ? "Internal note" : null);
+
+      if (!internal) {
+        await sendNotifications(
+          req.params.id, req.user.id,
+          "comment_added",
+          `[${ref}] ${req.user.full_name}: "${commentBody.substring(0, 80)}${commentBody.length > 80 ? "…" : ""}"`
+        );
+      } else {
+        await sendNotificationsStaffOnly(
+          req.params.id, req.user.id,
+          "comment_added",
+          `[${ref}] ${req.user.full_name} added an internal note`
+        );
+      }
 
       const [comment] = await db.query(
         `SELECT tc.*, u.full_name AS author_name
@@ -523,7 +643,7 @@ router.post("/:id/comments",
   }
 );
 
-// ─── ADD WORK LOG (IT Support Agent only) ────────────────────
+// ─── ADD WORK LOG ─────────────────────────────────────────────
 router.post("/:id/worklogs",
   authorizeRoles("IT Support Agent", "Admin"),
   [
@@ -538,8 +658,9 @@ router.post("/:id/worklogs",
     try {
       const { minutes, description } = req.body;
 
-      const [ticket] = await db.query("SELECT id FROM tickets WHERE id = ?", [req.params.id]);
-      if (ticket.length === 0)
+      const [ticketRows] = await db.query(
+        "SELECT id, reference_no FROM tickets WHERE id = ?", [req.params.id]);
+      if (ticketRows.length === 0)
         return res.status(404).json({ success: false, message: "Ticket not found" });
 
       const logId = uuidv4();

@@ -1,15 +1,18 @@
 import React from "react";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext";
-import LoginPage          from "./pages/LoginPage";
-import RegisterPage       from "./pages/RegisterPage";
-import DashboardPage      from "./pages/DashboardPage";
-import TicketListPage     from "./pages/TicketListPage";
-import CreateTicketPage   from "./pages/CreateTicketPage";
-import TicketDetailPage   from "./pages/TicketDetailPage";
-import ManagerDashboard   from "./pages/ManagerDashboard";
-import TicketHistoryPage  from "./pages/TicketHistoryPage";
-import ActivityLogsPage   from "./pages/ActivityLogsPage";
+import { NotificationProvider } from "./context/NotificationContext";
+import LoginPage            from "./pages/LoginPage";
+import RegisterPage         from "./pages/RegisterPage";
+import DashboardPage        from "./pages/DashboardPage";
+import TicketListPage       from "./pages/TicketListPage";
+import CreateTicketPage     from "./pages/CreateTicketPage";
+import TicketDetailPage     from "./pages/TicketDetailPage";
+import ManagerDashboard     from "./pages/ManagerDashboard";
+import TicketHistoryPage    from "./pages/TicketHistoryPage";
+import ActivityLogsPage     from "./pages/ActivityLogsPage";
+import AnalyticsDashboard   from "./pages/AnalyticsDashboard";
+import NotificationsPage    from "./pages/NotificationsPage";
 
 function PrivateRoute({ children, roles }) {
   const { user, loading } = useAuth();
@@ -30,40 +33,58 @@ function PublicRoute({ children }) {
   return user ? <Navigate to="/dashboard" replace /> : children;
 }
 
+function AppRoutes() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/"               element={<Navigate to="/login" replace />} />
+        <Route path="/login"          element={<PublicRoute><LoginPage /></PublicRoute>} />
+        <Route path="/register"       element={<PublicRoute><RegisterPage /></PublicRoute>} />
+        <Route path="/dashboard"      element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
+        <Route path="/tickets"        element={<PrivateRoute><TicketListPage /></PrivateRoute>} />
+        <Route path="/tickets/new"    element={
+          <PrivateRoute roles={["Employee","IT Support Agent","Admin"]}>
+            <CreateTicketPage />
+          </PrivateRoute>
+        } />
+        <Route path="/tickets/:id"    element={<PrivateRoute><TicketDetailPage /></PrivateRoute>} />
+        <Route path="/manager"        element={
+          <PrivateRoute roles={["Manager","Admin"]}>
+            <ManagerDashboard />
+          </PrivateRoute>
+        } />
+        <Route path="/history"        element={
+          <PrivateRoute roles={["Admin","Manager"]}>
+            <TicketHistoryPage />
+          </PrivateRoute>
+        } />
+        <Route path="/activity"       element={
+          <PrivateRoute roles={["IT Support Agent","Admin","Manager"]}>
+            <ActivityLogsPage />
+          </PrivateRoute>
+        } />
+        <Route path="/analytics"      element={
+          <PrivateRoute>
+            <AnalyticsDashboard />
+          </PrivateRoute>
+        } />
+        <Route path="/notifications"  element={
+          <PrivateRoute>
+            <NotificationsPage />
+          </PrivateRoute>
+        } />
+        <Route path="*"               element={<Navigate to="/login" replace />} />
+      </Routes>
+    </BrowserRouter>
+  );
+}
+
 export default function App() {
   return (
     <AuthProvider>
-      <BrowserRouter>
-        <Routes>
-          <Route path="/"          element={<Navigate to="/login" replace />} />
-          <Route path="/login"     element={<PublicRoute><LoginPage /></PublicRoute>} />
-          <Route path="/register"  element={<PublicRoute><RegisterPage /></PublicRoute>} />
-          <Route path="/dashboard" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
-          <Route path="/tickets"   element={<PrivateRoute><TicketListPage /></PrivateRoute>} />
-          <Route path="/tickets/new" element={
-            <PrivateRoute roles={["Employee","IT Support Agent","Admin"]}>
-              <CreateTicketPage />
-            </PrivateRoute>
-          } />
-          <Route path="/tickets/:id" element={<PrivateRoute><TicketDetailPage /></PrivateRoute>} />
-          <Route path="/manager"   element={
-            <PrivateRoute roles={["Manager","Admin"]}>
-              <ManagerDashboard />
-            </PrivateRoute>
-          } />
-          <Route path="/history"   element={
-            <PrivateRoute roles={["Admin","Manager"]}>
-              <TicketHistoryPage />
-            </PrivateRoute>
-          } />
-          <Route path="/activity"  element={
-            <PrivateRoute roles={["IT Support Agent","Admin","Manager"]}>
-              <ActivityLogsPage />
-            </PrivateRoute>
-          } />
-          <Route path="*" element={<Navigate to="/login" replace />} />
-        </Routes>
-      </BrowserRouter>
+      <NotificationProvider>
+        <AppRoutes />
+      </NotificationProvider>
     </AuthProvider>
   );
 }

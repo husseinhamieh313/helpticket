@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import React from "react";
 import api from "../utils/api";
+import NotificationCenter from "../components/NotificationCenter";
 
 const ROLE_COLORS = { Admin:"#ef4444", "IT Support Agent":"#3b82f6", Employee:"#22c55e", Manager:"#f59e0b" };
 const ROLE_ICONS  = { Admin:"🛡️", "IT Support Agent":"🔧", Employee:"👤", Manager:"📊" };
@@ -79,41 +80,40 @@ export default function DashboardPage() {
 
   const roleColor = ROLE_COLORS[user?.role] || "#3b82f6";
   const roleIcon  = ROLE_ICONS[user?.role]  || "👤";
+  const isAdminOrManager = ["Admin","Manager"].includes(user?.role);
+  const canSeeActivity = ["IT Support Agent","Admin","Manager"].includes(user?.role);
 
   const quickActions = {
     Employee: [
       { icon:"🎫", label:"Submit a ticket",  desc:"Report a new IT issue",       color:"#3b82f6", path:"/tickets/new" },
       { icon:"📋", label:"My tickets",       desc:"Track your open requests",     color:"#22c55e", path:"/tickets"     },
-      { icon:"📚", label:"Knowledge base",   desc:"Find answers quickly",         color:"#f59e0b", path:"/kb"          },
+      { icon:"📊", label:"Analytics",        desc:"View your ticket stats",       color:"#8b5cf6", path:"/analytics"   },
     ],
     "IT Support Agent": [
       { icon:"📋", label:"All tickets",      desc:"View and manage tickets",      color:"#3b82f6", path:"/tickets"     },
-      { icon:"⚡", label:"Unassigned",       desc:"Pick up open tickets",         color:"#ef4444", path:"/tickets"     },
-      { icon:"📊", label:"My performance",   desc:"Resolution stats",             color:"#22c55e", path:"/reports"     },
+      { icon:"📊", label:"Analytics",        desc:"Performance & resolution stats",color:"#8b5cf6", path:"/analytics"  },
+      { icon:"📝", label:"Activity logs",    desc:"Your work sessions",           color:"#22c55e", path:"/activity"    },
     ],
     Manager: [
-      { icon:"🔍", label:"Ticket History",   desc:"Full audit trail",             color:"#8b5cf6", path:"/history"     },
+      { icon:"📊", label:"Analytics",        desc:"Team analytics & KPIs",        color:"#8b5cf6", path:"/analytics"   },
       { icon:"👥", label:"Team Overview",    desc:"Monitor team workload",        color:"#3b82f6", path:"/manager"     },
-      { icon:"📊", label:"Reports",          desc:"Team analytics & SLA",         color:"#f59e0b", path:"/reports"     },
+      { icon:"🔍", label:"Ticket History",   desc:"Full audit trail",             color:"#f59e0b", path:"/history"     },
     ],
     Admin: [
       { icon:"📋", label:"All tickets",      desc:"View and manage all tickets",  color:"#3b82f6", path:"/tickets"     },
-      { icon:"🔍", label:"Ticket History",   desc:"Full audit trail of all actions", color:"#8b5cf6", path:"/history"  },
-      { icon:"📊", label:"Full reports",     desc:"All system analytics",         color:"#f59e0b", path:"/reports"     },
+      { icon:"📊", label:"Analytics",        desc:"Full system analytics",        color:"#8b5cf6", path:"/analytics"   },
+      { icon:"🔍", label:"Ticket History",   desc:"Full audit trail",             color:"#f59e0b", path:"/history"     },
     ],
   };
 
-  const actions      = quickActions[user?.role] || quickActions["Employee"];
-  const canCreate    = ["Employee","IT Support Agent","Admin"].includes(user?.role);
-  const isAdminOrManager = ["Admin","Manager"].includes(user?.role);
-  const greeting     = new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening";
-
-  const isAgent = user?.role === "IT Support Agent";
-  const canSeeActivity = ["IT Support Agent","Admin","Manager"].includes(user?.role);
+  const actions   = quickActions[user?.role] || quickActions["Employee"];
+  const canCreate = ["Employee","IT Support Agent","Admin"].includes(user?.role);
+  const greeting  = new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening";
 
   const navItems = [
     { label:"Dashboard",      path:"/dashboard" },
     { label:"Tickets",        path:"/tickets"   },
+    { label:"📊 Analytics",   path:"/analytics" },
     ...(canSeeActivity ? [{ label:"📝 Activity", path:"/activity" }] : []),
     ...(isAdminOrManager ? [{ label:"🔍 History", path:"/history" }] : []),
     ...(isAdminOrManager ? [{ label:"Team Overview", path:"/manager" }] : []),
@@ -146,7 +146,7 @@ export default function DashboardPage() {
         </div>
         <div style={st.topbarRight}>
           <span style={st.clock}>{time.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" })}</span>
-          <button style={st.notifBtn}>🔔<span style={st.notifDot} /></button>
+          <NotificationCenter />
           <div style={st.userMenu}>
             <div style={{ ...st.roleTag, background:roleColor+"20", color:roleColor }}>
               {roleIcon} {user?.role}
@@ -189,7 +189,7 @@ export default function DashboardPage() {
             onClick={() => navigate("/tickets")} />
           <StatCard label="Total tickets"  value={loading ? "…" : stats.total}
             sub="All time" icon="📋" color="#8b5cf6"
-            onClick={() => navigate("/tickets")} />
+            onClick={() => navigate("/analytics")} />
         </div>
 
         <div style={st.contentGrid}>
@@ -250,7 +250,7 @@ export default function DashboardPage() {
           </div>
         </div>
       </main>
-      <style>{`* { box-sizing:border-box; } button { font-family:inherit; }`}</style>
+      <style>{`* { box-sizing:border-box; } button { font-family:inherit; } @keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
@@ -267,12 +267,8 @@ const st = {
   nav:          { display:"flex", gap:2 },
   navBtn:       { fontSize:13, padding:"6px 10px", borderRadius:7, transition:"all .15s",
     cursor:"pointer", border:"none", fontWeight:500 },
-  topbarRight:  { display:"flex", alignItems:"center", gap:16 },
+  topbarRight:  { display:"flex", alignItems:"center", gap:12 },
   clock:        { fontSize:12, color:"#5555aa", fontFamily:"monospace" },
-  notifBtn:     { background:"none", border:"none", cursor:"pointer", fontSize:16,
-    position:"relative", color:"#e0e0f0", padding:4 },
-  notifDot:     { position:"absolute", top:4, right:2, width:7, height:7,
-    borderRadius:"50%", background:"#ef4444", border:"2px solid #13131f" },
   userMenu:     { display:"flex", alignItems:"center", gap:10 },
   roleTag:      { fontSize:11, fontWeight:600, padding:"3px 10px", borderRadius:99,
     display:"flex", alignItems:"center", gap:5 },
