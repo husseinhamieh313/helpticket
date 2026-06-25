@@ -27,16 +27,11 @@ app.use(
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Serve uploaded files statically
-app.use("/uploads", express.static(path.join(__dirname, "../uploads")));
-
 app.use("/api/auth",          require("./routes/auth"));
 app.use("/api/tickets",       require("./routes/tickets"));
 app.use("/api/notifications", require("./routes/notifications"));
-
-// Nested attachment routes: /api/tickets/:id/attachments
-const attachmentRouter = require("./routes/attachments");
-app.use("/api/tickets/:id/attachments", attachmentRouter);
+app.use("/api/ai",            require("./routes/ai"));
+app.use("/api/users",         require("./routes/users"));
 
 app.get("/api/health", (req, res) => res.json({ status: "ok" }));
 
