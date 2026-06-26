@@ -48,7 +48,7 @@ export default function DashboardPage() {
   const navigate  = useNavigate();
   const location  = useLocation();
 
-  const [stats,        setStats]        = useState({ open:"-", in_progress:"-", resolved:"-", total:"-", breached:"-" });
+  const [stats,        setStats]        = useState({ open:"-", in_progress:"-", resolved:"-", total:"-", breached:"-", avgRating:null, ratingCount:0 });
   const [recentTickets,setRecentTickets]= useState([]);
   const [loading,      setLoading]      = useState(true);
   const [time,         setTime]         = useState(new Date());
@@ -61,14 +61,21 @@ export default function DashboardPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const res = await api.get("/tickets");
-        const tickets = res.data.tickets || [];
+        const [ticketsRes, ratingRes] = await Promise.all([
+          api.get("/tickets"),
+          api.get("/tickets/ratings/summary").catch(() => ({ data: { average: null, count: 0 } })),
+        ]);
+        const tickets = ticketsRes.data.tickets || [];
         const open        = tickets.filter(t => t.status === "Open").length;
         const in_progress = tickets.filter(t => t.status === "In Progress").length;
         const resolved     = tickets.filter(t => t.status === "Resolved").length;
         const total        = tickets.length;
         const breached      = tickets.filter(t => t.is_breached).length;
-        setStats({ open, in_progress, resolved, total, breached });
+        setStats({
+          open, in_progress, resolved, total, breached,
+          avgRating: ratingRes.data.average,
+          ratingCount: ratingRes.data.count,
+        });
         setRecentTickets(tickets.slice(0, 5));
       } catch (err) {
         console.error("Dashboard fetch error:", err);
@@ -197,6 +204,9 @@ export default function DashboardPage() {
             icon="⏰" color="#ef4444"
             onClick={() => navigate("/tickets")}
             highlight={!loading && stats.breached > 0} />
+          <StatCard label="Avg rating"     value={loading ? "…" : (stats.avgRating != null ? `${stats.avgRating}★` : "—")}
+            sub={stats.ratingCount > 0 ? `From ${stats.ratingCount} rating${stats.ratingCount !== 1 ? "s" : ""}` : "No ratings yet"}
+            icon="⭐" color="#f59e0b" />
         </div>
 
         <div style={st.contentGrid}>
@@ -298,7 +308,7 @@ const st = {
   welcomeSub:   { fontSize:13, color:"#5555aa" },
   newTicketBtn: { background:"linear-gradient(135deg,#3b82f6,#6366f1)", border:"none",
     borderRadius:10, padding:"11px 20px", color:"#fff", fontSize:14, fontWeight:700, cursor:"pointer" },
-  statsGrid:    { display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:14, marginBottom:24 },
+  statsGrid:    { display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:14, marginBottom:24 },
   contentGrid:  { display:"grid", gridTemplateColumns:"1fr 340px", gap:16 },
   tableCard:    { background:"#1e1e2e", border:"1px solid rgba(255,255,255,0.07)", borderRadius:14, padding:"20px 22px" },
   actionsCard:  { background:"#1e1e2e", border:"1px solid rgba(255,255,255,0.07)", borderRadius:14, padding:"20px 22px" },

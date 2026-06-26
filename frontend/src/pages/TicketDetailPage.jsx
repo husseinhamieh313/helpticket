@@ -3,6 +3,7 @@ import React from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import api from "../utils/api";
+import RatingModal from "../components/RatingModal";
 
 const PRIORITY_COLORS = { Critical:"#ef4444", High:"#f59e0b", Medium:"#3b82f6", Low:"#6b7280" };
 const STATUS_COLORS   = { Open:"#3b82f6", "In Progress":"#f59e0b", Pending:"#6b7280", Resolved:"#22c55e", Closed:"#374151" };
@@ -60,6 +61,9 @@ export default function TicketDetailPage() {
   const [postingComment,setPostingComment]= useState(false);
   const [error,         setError]         = useState("");
   const [activeTab,     setActiveTab]     = useState("comments");
+  const [myRating,      setMyRating]      = useState(null);
+  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [ratingSubmitting, setRatingSubmitting] = useState(false);
 
   // Work log form
   const [wlMinutes,     setWlMinutes]     = useState("");
@@ -100,6 +104,7 @@ export default function TicketDetailPage() {
       setAssignments(tRes.data.assignments || []);
       setWorkLogs(tRes.data.workLogs || []);
       setTicketHistory(tRes.data.ticketHistory || []);
+      setMyRating(tRes.data.myRating || null);
       setMeta(mRes.data);
       setEditForm({
         title:       t.title,
@@ -119,15 +124,31 @@ export default function TicketDetailPage() {
     setSaving(true);
     setError("");
     try {
+      const wasResolved = ticket.status === "Resolved";
       const res = await api.put(`/tickets/${id}`, editForm);
       setTicket(res.data.ticket);
       const tRes = await api.get(`/tickets/${id}`);
       setAssignments(tRes.data.assignments || []);
       setTicketHistory(tRes.data.ticketHistory || []);
       setEditing(false);
+
+      // Just transitioned into Resolved -> prompt for a rating
+      if (!wasResolved && res.data.ticket.status === "Resolved") {
+        setShowRatingModal(true);
+      }
     } catch (e) {
       setError(e.response?.data?.message || "Update failed");
     } finally { setSaving(false); }
+  };
+
+  const handleRatingSubmit = async ({ rating, comment }) => {
+    setRatingSubmitting(true);
+    try {
+      const res = await api.post(`/tickets/${id}/rating`, { rating, comment });
+      setMyRating(res.data.myRating);
+    } finally {
+      setRatingSubmitting(false);
+    }
   };
 
   const handleDelete = async () => {
@@ -594,6 +615,21 @@ export default function TicketDetailPage() {
                 </span>
               </Field>
             )}
+
+            {ticket.status === "Resolved" && (
+              <Field label="Your rating">
+                {myRating ? (
+                  <div>
+                    <div style={{ fontSize:14, color:"#f59e0b", marginBottom:4 }}>
+                      {"★".repeat(myRating.rating)}{"☆".repeat(5 - myRating.rating)}
+                    </div>
+                    <button style={s.rateLink} onClick={() => setShowRatingModal(true)}>Edit rating</button>
+                  </div>
+                ) : (
+                  <button style={s.rateBtn} onClick={() => setShowRatingModal(true)}>⭐ Rate this ticket</button>
+                )}
+              </Field>
+            )}
           </div>
 
           {/* Work time summary — agents and above only */}
@@ -653,6 +689,14 @@ export default function TicketDetailPage() {
         </div>
       </div>
       <style>{`* { box-sizing:border-box; } textarea { resize:vertical; }`}</style>
+
+      <RatingModal
+        open={showRatingModal}
+        onClose={() => setShowRatingModal(false)}
+        onSubmit={handleRatingSubmit}
+        existingRating={myRating}
+        ticketRef={ticket.reference_no}
+      />
     </div>
   );
 }
@@ -696,6 +740,8 @@ const s = {
   sideCard:      { background:"#13131f", border:"1px solid rgba(255,255,255,0.07)", borderRadius:12, padding:"16px" },
   sideCardTitle: { fontSize:11, fontWeight:600, color:"#5555aa", textTransform:"uppercase", letterSpacing:".06em", marginBottom:14 },
   catChip:       { fontSize:12, color:"#8888bb", background:"rgba(255,255,255,0.06)", padding:"3px 10px", borderRadius:6 },
+  rateBtn:       { background:"rgba(245,158,11,.12)", border:"1px solid rgba(245,158,11,.3)", borderRadius:8, padding:"7px 12px", color:"#f59e0b", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit" },
+  rateLink:      { background:"none", border:"none", color:"#3b82f6", fontSize:11, cursor:"pointer", padding:0, fontFamily:"inherit" },
   btnPrimary:    { background:"linear-gradient(135deg,#3b82f6,#6366f1)", border:"none", borderRadius:8, padding:"9px 16px", color:"#fff", fontSize:12, fontWeight:700, cursor:"pointer", fontFamily:"inherit" },
   btnEdit:       { background:"#1e1e2e", border:"1px solid #2a2a3a", borderRadius:8, padding:"8px 14px", color:"#c0c0d0", fontSize:12, cursor:"pointer", fontFamily:"inherit" },
   btnSecondary:  { background:"#1e1e2e", border:"1px solid #2a2a3a", borderRadius:8, padding:"8px 14px", color:"#c0c0d0", fontSize:12, cursor:"pointer", fontFamily:"inherit" },

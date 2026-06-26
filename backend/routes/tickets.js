@@ -24,6 +24,12 @@ const BREACH_DEADLINE_SELECT = `
     ELSE DATE_ADD(t.created_at, INTERVAL p.sla_hours HOUR)
   END AS sla_deadline`;
 
+// ─── SHARED SQL: satisfaction rating aggregates ──────────────
+// Average + count of all ratings on a ticket (everyone who rated it, averaged).
+const RATING_AGG_SELECT = `
+  (SELECT ROUND(AVG(tr.rating), 1) FROM ticket_ratings tr WHERE tr.ticket_id = t.id) AS avg_rating,
+  (SELECT COUNT(*) FROM ticket_ratings tr WHERE tr.ticket_id = t.id) AS rating_count`;
+
 // ─── HELPER: insert a ticket_history row ─────────────────────
 async function logHistory(ticketId, actorId, action, fieldName, oldVal, newVal, note) {
   await db.query(
@@ -52,7 +58,8 @@ router.get("/", async (req, res) => {
              assignee.full_name AS assigned_to_name, assignee.id AS assigned_to_id,
              (SELECT COUNT(*) FROM ticket_assignments ta WHERE ta.ticket_id = t.id) AS assignment_count,
              ${BREACH_SELECT},
-             ${BREACH_DEADLINE_SELECT}
+             ${BREACH_DEADLINE_SELECT},
+             ${RATING_AGG_SELECT}
       FROM tickets t
       JOIN categories c   ON t.category_id = c.id
       JOIN priorities p   ON t.priority_id  = p.id
@@ -239,7 +246,8 @@ router.get("/:id", async (req, res) => {
              creator.full_name  AS created_by_name,  creator.id AS created_by_id,
              assignee.full_name AS assigned_to_name, assignee.id AS assigned_to_id,
              ${BREACH_SELECT},
-             ${BREACH_DEADLINE_SELECT}
+             ${BREACH_DEADLINE_SELECT},
+             ${RATING_AGG_SELECT}
       FROM tickets t
       JOIN categories c   ON t.category_id = c.id
       JOIN priorities p   ON t.priority_id  = p.id
@@ -313,7 +321,14 @@ router.get("/:id", async (req, res) => {
       ticketHistory = hist;
     }
 
-    return res.json({ success: true, ticket, comments, assignments, workLogs, ticketHistory });
+    // This user's own rating on this ticket, if any
+    const [myRatingRows] = await db.query(
+      `SELECT rating, comment, created_at, updated_at FROM ticket_ratings WHERE ticket_id = ? AND user_id = ?`,
+      [req.params.id, req.user.id]
+    );
+    const myRating = myRatingRows[0] || null;
+
+    return res.json({ success: true, ticket, comments, assignments, workLogs, ticketHistory, myRating });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ success: false, message: "Server error" });
@@ -679,6 +694,126 @@ router.get("/meta/all", async (req, res) => {
     return res.json({ success: true, categories, priorities, statuses, agents });
   } catch (err) {
     console.error(err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// ─── SUBMIT / UPDATE RATING (anyone who can view the ticket) ─
+// Upsert: one rating per (ticket, user). Re-rating updates the existing row.
+router.post("/:id/rating",
+  [
+    body("rating").isInt({ min: 1, max: 5 }).withMessage("Rating must be between 1 and 5"),
+    body("comment").optional().trim().isLength({ max: 1000 }).withMessage("Comment is too long"),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty())
+      return res.status(400).json({ success: false, errors: errors.array() });
+
+    try {
+      const [rows] = await db.query(
+        "SELECT id, created_by, assigned_to FROM tickets WHERE id = ?",
+        [req.params.id]
+      );
+      if (rows.length === 0)
+        return res.status(404).json({ success: false, message: "Ticket not found" });
+
+      const ticket = rows[0];
+      const role = req.user.role;
+
+      // Same visibility rule as viewing the ticket — can't rate what you can't see
+      if (role === "Employee" && ticket.created_by !== req.user.id)
+        return res.status(403).json({ success: false, message: "Access denied" });
+      if (role === "IT Support Agent" && ticket.assigned_to !== req.user.id)
+        return res.status(403).json({ success: false, message: "Access denied" });
+
+      const { rating, comment } = req.body;
+
+      await db.query(
+        `INSERT INTO ticket_ratings (id, ticket_id, user_id, rating, comment)
+         VALUES (UUID(), ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE rating = VALUES(rating), comment = VALUES(comment), updated_at = NOW()`,
+        [req.params.id, req.user.id, rating, comment || null]
+      );
+
+      await logHistory(req.params.id, req.user.id, "RATING_SUBMITTED", "rating", null, String(rating), comment || null);
+
+      const [saved] = await db.query(
+        `SELECT rating, comment, created_at, updated_at FROM ticket_ratings WHERE ticket_id = ? AND user_id = ?`,
+        [req.params.id, req.user.id]
+      );
+
+      return res.json({ success: true, message: "Rating saved", myRating: saved[0] });
+    } catch (err) {
+      console.error("Submit rating error:", err);
+      return res.status(500).json({ success: false, message: "Server error" });
+    }
+  }
+);
+
+// ─── GET ALL RATINGS FOR A TICKET ────────────────────────────
+router.get("/:id/ratings", async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      "SELECT id, created_by, assigned_to FROM tickets WHERE id = ?",
+      [req.params.id]
+    );
+    if (rows.length === 0)
+      return res.status(404).json({ success: false, message: "Ticket not found" });
+
+    const ticket = rows[0];
+    const role = req.user.role;
+    if (role === "Employee" && ticket.created_by !== req.user.id)
+      return res.status(403).json({ success: false, message: "Access denied" });
+    if (role === "IT Support Agent" && ticket.assigned_to !== req.user.id)
+      return res.status(403).json({ success: false, message: "Access denied" });
+
+    const [ratings] = await db.query(
+      `SELECT tr.rating, tr.comment, tr.created_at, tr.updated_at,
+              u.full_name AS rater_name, r.name AS rater_role
+       FROM ticket_ratings tr
+       JOIN users u ON tr.user_id = u.id
+       JOIN roles r ON u.role_id  = r.id
+       WHERE tr.ticket_id = ?
+       ORDER BY tr.created_at DESC`,
+      [req.params.id]
+    );
+
+    const avg = ratings.length
+      ? Math.round((ratings.reduce((sum, r) => sum + r.rating, 0) / ratings.length) * 10) / 10
+      : null;
+
+    return res.json({ success: true, ratings, average: avg, count: ratings.length });
+  } catch (err) {
+    console.error("Get ratings error:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+});
+
+// ─── RATING SUMMARY (role-scoped, for dashboard "Avg rating" tile) ──
+router.get("/ratings/summary", async (req, res) => {
+  try {
+    const role = req.user.role;
+
+    let query = `
+      SELECT tr.rating
+      FROM ticket_ratings tr
+      JOIN tickets t ON tr.ticket_id = t.id
+      WHERE 1=1`;
+    const params = [];
+
+    if (role === "Employee")         { query += " AND t.created_by = ?";  params.push(req.user.id); }
+    if (role === "IT Support Agent") { query += " AND t.assigned_to = ?"; params.push(req.user.id); }
+
+    const [rows] = await db.query(query, params);
+    const count = rows.length;
+    const average = count
+      ? Math.round((rows.reduce((sum, r) => sum + r.rating, 0) / count) * 10) / 10
+      : null;
+
+    return res.json({ success: true, average, count });
+  } catch (err) {
+    console.error("Rating summary error:", err);
     return res.status(500).json({ success: false, message: "Server error" });
   }
 });
