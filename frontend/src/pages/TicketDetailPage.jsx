@@ -3,7 +3,6 @@ import React from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import api from "../utils/api";
-import FileAttachments from "../components/FileAttchments";
 
 const PRIORITY_COLORS = { Critical:"#ef4444", High:"#f59e0b", Medium:"#3b82f6", Low:"#6b7280" };
 const STATUS_COLORS   = { Open:"#3b82f6", "In Progress":"#f59e0b", Pending:"#6b7280", Resolved:"#22c55e", Closed:"#374151" };
@@ -17,7 +16,6 @@ const ACTION_LABELS = {
   COMMENT_ADDED:       { label:"Comment Added",         icon:"💬", color:"#3b82f6" },
   INTERNAL_NOTE_ADDED: { label:"Internal Note Added",   icon:"🔒", color:"#f59e0b" },
   WORK_LOGGED:         { label:"Work Logged",           icon:"⏱️", color:"#22c55e" },
-  ATTACHMENT_ADDED:    { label:"Attachment Added",      icon:"📎", color:"#06b6d4" },
 };
 
 const Badge = ({ label, colorMap, size=10 }) => {
@@ -52,7 +50,6 @@ export default function TicketDetailPage() {
   const [assignments,   setAssignments]   = useState([]);
   const [workLogs,      setWorkLogs]      = useState([]);
   const [ticketHistory, setTicketHistory] = useState([]);
-  const [attachments,   setAttachments]   = useState([]);
   const [meta,          setMeta]          = useState({ categories:[], priorities:[], statuses:[], agents:[] });
   const [loading,       setLoading]       = useState(true);
   const [editing,       setEditing]       = useState(false);
@@ -64,6 +61,7 @@ export default function TicketDetailPage() {
   const [error,         setError]         = useState("");
   const [activeTab,     setActiveTab]     = useState("comments");
 
+  // Work log form
   const [wlMinutes,     setWlMinutes]     = useState("");
   const [wlDesc,        setWlDesc]        = useState("");
   const [postingWl,     setPostingWl]     = useState(false);
@@ -90,21 +88,18 @@ export default function TicketDetailPage() {
   const canChangeAssignee  = isAgent || isManager;
   const canChangeDueDate   = isAgent || isManager;
   const canChangeContent   = isAgent || (isEmployee && !isAssigned);
-  const canUploadFiles     = isAgent || isEmployee;
 
   useEffect(() => {
     Promise.all([
       api.get(`/tickets/${id}`),
       api.get("/tickets/meta/all"),
-      api.get(`/tickets/${id}/attachments`),
-    ]).then(([tRes, mRes, aRes]) => {
+    ]).then(([tRes, mRes]) => {
       const t = tRes.data.ticket;
       setTicket(t);
       setComments(tRes.data.comments || []);
       setAssignments(tRes.data.assignments || []);
       setWorkLogs(tRes.data.workLogs || []);
       setTicketHistory(tRes.data.ticketHistory || []);
-      setAttachments(aRes.data.attachments || []);
       setMeta(mRes.data);
       setEditForm({
         title:       t.title,
@@ -151,6 +146,7 @@ export default function TicketDetailPage() {
       const res = await api.post(`/tickets/${id}/comments`, { body: comment, is_internal: isInternal });
       setComments(prev => [...prev, res.data.comment]);
       setComment("");
+      // Refresh history
       if (isAdminOrManager) {
         const tRes = await api.get(`/tickets/${id}`);
         setTicketHistory(tRes.data.ticketHistory || []);
@@ -191,15 +187,15 @@ export default function TicketDetailPage() {
   if (!ticket) return null;
 
   const tabs = [
-    { key:"comments",      label:`💬 Comments (${comments.length})` },
-    { key:"attachments",   label:`📎 Attachments (${attachments.length})` },
+    { key:"comments", label:`💬 Comments (${comments.length})` },
     ...(!isEmployee ? [{ key:"worklogs", label:`⏱️ Work Logs (${workLogs.length})` }] : []),
-    { key:"history",       label:`📋 Assignments (${assignments.length})` },
+    { key:"history",  label:`📋 Assignment History (${assignments.length})` },
     ...(isAdminOrManager ? [{ key:"tickethistory", label:`🔍 Full History (${ticketHistory.length})` }] : []),
   ];
 
   return (
     <div style={s.root}>
+      {/* Top bar */}
       <div style={s.topBar}>
         <button style={s.backBtn} onClick={() => navigate("/tickets")}>← All tickets</button>
         <div style={{ display:"flex", gap:8, alignItems:"center" }}>
@@ -223,14 +219,34 @@ export default function TicketDetailPage() {
 
       {error && <div style={s.errorBanner}>⚠️ {error}</div>}
 
+      {/* SLA breach warning */}
+      {ticket.is_breached && (
+        <div style={s.slaBanner}>
+          <span style={{ fontSize:16 }}>⏰</span>
+          <div>
+            <div style={{ fontWeight:700, color:"#fca5a5" }}>This ticket is past its SLA deadline</div>
+            <div style={{ fontSize:12, color:"#fca5a5", opacity:0.85, marginTop:2 }}>
+              {ticket.sla_deadline
+                ? `Deadline was ${new Date(ticket.sla_deadline).toLocaleString()}`
+                : `Based on ${ticket.priority} priority (${ticket.sla_hours}h SLA)`}
+              {isAgent || isManager ? " — please prioritize or update its status." : ""}
+            </div>
+          </div>
+        </div>
+      )}
+
       <div style={s.layout}>
         {/* ── Left: main content ── */}
         <div>
+          {/* Title + meta */}
           <div style={{ marginBottom:20 }}>
             <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:8, flexWrap:"wrap" }}>
               <span style={s.refBadge}>{ticket.reference_no}</span>
               <Badge label={ticket.status}   colorMap={STATUS_COLORS}   size={11} />
               <Badge label={ticket.priority} colorMap={PRIORITY_COLORS} size={11} />
+              {ticket.is_breached && (
+                <span style={s.slaChip}>⏰ SLA breached</span>
+              )}
               {isAssigned && (
                 <span style={s.assignedChip}>
                   👤 Assigned to {ticket.assigned_to_name}
@@ -241,9 +257,6 @@ export default function TicketDetailPage() {
               )}
               {totalWorkMinutes > 0 && (
                 <span style={s.workChip}>⏱️ {fmtMinutes(totalWorkMinutes)} logged</span>
-              )}
-              {attachments.length > 0 && (
-                <span style={s.attachChip}>📎 {attachments.length} file{attachments.length !== 1 ? "s" : ""}</span>
               )}
             </div>
             {editing && canChangeContent ? (
@@ -259,6 +272,7 @@ export default function TicketDetailPage() {
             </div>
           </div>
 
+          {/* Description */}
           <div style={s.section}>
             <div style={s.sectionTitle}>Description</div>
             {editing && canChangeContent ? (
@@ -327,20 +341,10 @@ export default function TicketDetailPage() {
               </div>
             )}
 
-            {/* ── Attachments ── */}
-            {activeTab === "attachments" && (
-              <div style={{ marginTop:14 }}>
-                <FileAttachments
-                  ticketId={id}
-                  attachments={attachments}
-                  canUpload={canUploadFiles}
-                />
-              </div>
-            )}
-
             {/* ── Work Logs ── */}
             {activeTab === "worklogs" && (
               <div style={{ marginTop:14 }}>
+                {/* Summary */}
                 {workLogs.length > 0 && (
                   <div style={s.wlSummary}>
                     <span style={{ fontSize:12, color:"#8888bb" }}>Total time logged:</span>
@@ -350,6 +354,8 @@ export default function TicketDetailPage() {
                     <span style={{ fontSize:11, color:"#5555aa" }}>across {workLogs.length} session{workLogs.length !== 1 ? "s" : ""}</span>
                   </div>
                 )}
+
+                {/* Log list */}
                 <div style={{ display:"flex", flexDirection:"column", gap:8, marginBottom:16 }}>
                   {workLogs.length === 0
                     ? <div style={{ fontSize:12, color:"#444466", padding:"12px 0" }}>No work logged yet.</div>
@@ -372,6 +378,8 @@ export default function TicketDetailPage() {
                     ))
                   }
                 </div>
+
+                {/* Add work log form */}
                 <div style={s.wlFormWrap}>
                   <div style={{ fontSize:11, fontWeight:600, color:"#5555aa", textTransform:"uppercase", letterSpacing:".06em", marginBottom:10 }}>
                     Log work session
@@ -379,7 +387,8 @@ export default function TicketDetailPage() {
                   <form onSubmit={handleWorkLog} style={{ display:"flex", flexDirection:"column", gap:8 }}>
                     <div style={{ display:"flex", gap:8 }}>
                       <div style={{ position:"relative", width:120, flexShrink:0 }}>
-                        <input type="number" min="1" max="1440"
+                        <input
+                          type="number" min="1" max="1440"
                           style={{ ...s.input, paddingRight:32 }}
                           placeholder="e.g. 90"
                           value={wlMinutes}
@@ -387,16 +396,21 @@ export default function TicketDetailPage() {
                         <span style={{ position:"absolute", right:10, top:"50%", transform:"translateY(-50%)",
                           fontSize:10, color:"#5555aa", pointerEvents:"none" }}>min</span>
                       </div>
-                      <input style={{ ...s.input, flex:1 }}
+                      <input
+                        style={{ ...s.input, flex:1 }}
                         placeholder="What did you work on?"
                         value={wlDesc}
                         onChange={e => setWlDesc(e.target.value)} />
                     </div>
                     {wlMinutes && (
-                      <div style={{ fontSize:11, color:"#5555aa" }}>= {fmtMinutes(Number(wlMinutes))}</div>
+                      <div style={{ fontSize:11, color:"#5555aa" }}>
+                        = {fmtMinutes(Number(wlMinutes))}
+                      </div>
                     )}
                     <div style={{ display:"flex", justifyContent:"flex-end" }}>
-                      <button type="submit" disabled={!wlMinutes || !wlDesc.trim() || postingWl} style={s.btnPrimary}>
+                      <button type="submit"
+                        disabled={!wlMinutes || !wlDesc.trim() || postingWl}
+                        style={s.btnPrimary}>
                         {postingWl ? "Logging..." : "Log work"}
                       </button>
                     </div>
@@ -438,14 +452,14 @@ export default function TicketDetailPage() {
               </div>
             )}
 
-            {/* ── Full Ticket History ── */}
+            {/* ── Full Ticket History (Admin/Manager) ── */}
             {activeTab === "tickethistory" && isAdminOrManager && (
               <div style={{ marginTop:14 }}>
                 {ticketHistory.length === 0 ? (
                   <div style={{ fontSize:12, color:"#444466", padding:"12px 0" }}>No history recorded yet.</div>
                 ) : (
                   <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-                    {ticketHistory.map((h) => {
+                    {ticketHistory.map((h, i) => {
                       const meta = ACTION_LABELS[h.action] || { label: h.action, icon:"📌", color:"#888" };
                       return (
                         <div key={h.id} style={s.thRow}>
@@ -476,6 +490,11 @@ export default function TicketDetailPage() {
                                 {h.new_value}
                               </div>
                             )}
+                            {h.note && (
+                              <div style={{ fontSize:11, color:"#666688", marginTop:3, fontStyle:"italic" }}>
+                                Note: {h.note}
+                              </div>
+                            )}
                           </div>
                         </div>
                       );
@@ -496,7 +515,7 @@ export default function TicketDetailPage() {
               {editing && canChangeStatus ? (
                 <select style={s.select} value={editForm.status_id}
                   onChange={e => setEditForm(p => ({ ...p, status_id: e.target.value }))}>
-                  {meta.statuses.map(st => <option key={st.id} value={st.id}>{st.name}</option>)}
+                  {meta.statuses.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                 </select>
               ) : <Badge label={ticket.status} colorMap={STATUS_COLORS} size={11} />}
             </Field>
@@ -561,6 +580,13 @@ export default function TicketDetailPage() {
               )}
             </Field>
 
+            <Field label="SLA deadline">
+              <span style={{ fontSize:12, color: ticket.is_breached ? "#ef4444" : "#c0c0d0" }}>
+                {ticket.sla_deadline ? new Date(ticket.sla_deadline).toLocaleString() : "—"}
+                {ticket.is_breached && " (breached)"}
+              </span>
+            </Field>
+
             {ticket.resolved_at && (
               <Field label="Resolved at">
                 <span style={{ fontSize:12, color:"#22c55e" }}>
@@ -570,6 +596,7 @@ export default function TicketDetailPage() {
             )}
           </div>
 
+          {/* Work time summary — agents and above only */}
           {workLogs.length > 0 && !isEmployee && (
             <div style={{ ...s.sideCard, borderColor:"rgba(34,197,94,.2)" }}>
               <div style={s.sideCardTitle}>⏱️ Time Tracking</div>
@@ -579,33 +606,53 @@ export default function TicketDetailPage() {
               <div style={{ fontSize:11, color:"#5555aa" }}>
                 {workLogs.length} session{workLogs.length !== 1 ? "s" : ""} logged
               </div>
+              {workLogs.length > 0 && (
+                <div style={{ marginTop:10, display:"flex", flexDirection:"column", gap:5 }}>
+                  {workLogs.slice(0, 3).map(w => (
+                    <div key={w.id} style={{ display:"flex", justifyContent:"space-between", fontSize:11 }}>
+                      <span style={{ color:"#8888bb", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", maxWidth:140 }}>
+                        {w.user_name}
+                      </span>
+                      <span style={{ color:"#22c55e", fontWeight:700, flexShrink:0 }}>{fmtMinutes(w.minutes)}</span>
+                    </div>
+                  ))}
+                  {workLogs.length > 3 && (
+                    <button style={{ background:"none", border:"none", color:"#3b82f6", fontSize:11, cursor:"pointer", textAlign:"left", padding:0, fontFamily:"inherit" }}
+                      onClick={() => setActiveTab("worklogs")}>
+                      +{workLogs.length - 3} more →
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
           )}
 
+          {/* Role permission info */}
           <div style={{ ...s.sideCard, background:"rgba(255,255,255,0.02)" }}>
             <div style={s.sideCardTitle}>Your permissions</div>
             {isEmployee && (
               <div style={{ fontSize:11, color:"#5555aa", lineHeight:1.7 }}>
                 {isAssigned
-                  ? <span style={{ color:"#f59e0b" }}>🔒 This ticket is assigned. You can only view, comment, and attach files.</span>
-                  : "You can edit title & description while the ticket is Open and unassigned. You can also attach files."
+                  ? <span style={{ color:"#f59e0b" }}>🔒 This ticket is assigned. You can only view, comment, and log work.</span>
+                  : "You can edit title & description while the ticket is Open and unassigned."
                 }
               </div>
             )}
             {isAgent && (
               <div style={{ fontSize:11, color:"#5555aa", lineHeight:1.7 }}>
-                You can update <strong style={{ color:"#8888bb" }}>all fields</strong>, log work, and manage attachments.
+                You can update <strong style={{ color:"#8888bb" }}>all fields</strong> including status, priority, assignment, and log work.
               </div>
             )}
             {isManager && (
               <div style={{ fontSize:11, color:"#5555aa", lineHeight:1.7 }}>
                 You can update <strong style={{ color:"#8888bb" }}>status, due date</strong> and <strong style={{ color:"#8888bb" }}>assignment</strong>.
+                Full ticket history is visible to you.
               </div>
             )}
           </div>
         </div>
       </div>
-      <style>{`* { box-sizing:border-box; } textarea { resize:vertical; } @keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <style>{`* { box-sizing:border-box; } textarea { resize:vertical; }`}</style>
     </div>
   );
 }
@@ -613,19 +660,21 @@ export default function TicketDetailPage() {
 const s = {
   root:          { padding:"24px 32px", maxWidth:1100, margin:"0 auto", fontFamily:"'DM Sans','Segoe UI',sans-serif", color:"#e0e0f0" },
   center:        { display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", minHeight:"60vh", fontFamily:"'DM Sans',sans-serif", color:"#5555aa" },
-  topBar:        { display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:20 },
+  topBar:        { display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16 },
   backBtn:       { background:"none", border:"none", color:"#5555aa", fontSize:13, cursor:"pointer", fontFamily:"inherit" },
+  slaBanner:     { display:"flex", alignItems:"flex-start", gap:10, background:"rgba(239,68,68,.08)",
+    border:"1px solid rgba(239,68,68,.25)", borderRadius:10, padding:"12px 16px", marginBottom:16 },
+  slaChip:       { fontSize:11, fontWeight:700, color:"#ef4444", background:"rgba(239,68,68,.15)", padding:"3px 10px", borderRadius:99 },
   layout:        { display:"grid", gridTemplateColumns:"1fr 270px", gap:20, alignItems:"start" },
   refBadge:      { fontFamily:"monospace", fontSize:12, fontWeight:700, color:"#3b82f6", background:"rgba(59,130,246,.12)", padding:"3px 10px", borderRadius:6 },
   assignedChip:  { fontSize:11, fontWeight:600, color:"#22c55e", background:"rgba(34,197,94,.1)", padding:"3px 10px", borderRadius:99, display:"flex", alignItems:"center", gap:4 },
   workChip:      { fontSize:11, fontWeight:600, color:"#22c55e", background:"rgba(34,197,94,.1)", padding:"3px 10px", borderRadius:99 },
-  attachChip:    { fontSize:11, fontWeight:600, color:"#06b6d4", background:"rgba(6,182,212,.1)", padding:"3px 10px", borderRadius:99 },
   assignCount:   { color:"#5555aa", fontWeight:400 },
   lockBadge:     { fontSize:11, fontWeight:600, color:"#f59e0b", background:"rgba(245,158,11,.1)", border:"1px solid rgba(245,158,11,.2)", padding:"4px 12px", borderRadius:8 },
   ticketTitle:   { fontSize:22, fontWeight:800, color:"#fff", letterSpacing:"-0.02em", lineHeight:1.3, margin:0 },
   section:       { background:"#13131f", border:"1px solid rgba(255,255,255,0.07)", borderRadius:14, padding:"20px 22px", marginBottom:14 },
   sectionTitle:  { fontSize:12, fontWeight:700, color:"#8888bb", textTransform:"uppercase", letterSpacing:".06em", marginBottom:14 },
-  tabs:          { display:"flex", gap:4, borderBottom:"1px solid rgba(255,255,255,0.07)", flexWrap:"wrap" },
+  tabs:          { display:"flex", gap:4, borderBottom:"1px solid rgba(255,255,255,0.07)", paddingBottom:0, flexWrap:"wrap" },
   tab:           { background:"none", border:"none", borderBottom:"2px solid transparent", padding:"8px 14px", fontSize:12, fontWeight:500, color:"#6666aa", cursor:"pointer", fontFamily:"inherit", marginBottom:"-1px" },
   tabActive:     { color:"#3b82f6", borderBottomColor:"#3b82f6" },
   commentCard:   { background:"#16161f", border:"1px solid rgba(255,255,255,0.06)", borderRadius:10, padding:"12px 14px" },
@@ -633,10 +682,12 @@ const s = {
   internalTag:   { fontSize:9, fontWeight:700, color:"#f59e0b", background:"#f59e0b22", padding:"1px 7px", borderRadius:99 },
   historyRow:    { display:"flex", gap:12, padding:"12px 14px", background:"#16161f", border:"1px solid rgba(255,255,255,0.06)", borderRadius:10 },
   historyIndex:  { width:24, height:24, borderRadius:"50%", background:"rgba(59,130,246,.2)", color:"#3b82f6", fontSize:11, fontWeight:700, display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0 },
+  // Work log styles
   wlCard:        { background:"#16161f", border:"1px solid rgba(255,255,255,0.06)", borderRadius:10, padding:"12px 14px" },
   wlTime:        { fontSize:13, fontWeight:800, color:"#22c55e", background:"rgba(34,197,94,.1)", padding:"2px 8px", borderRadius:6 },
   wlSummary:     { display:"flex", alignItems:"center", gap:10, background:"rgba(34,197,94,.05)", border:"1px solid rgba(34,197,94,.15)", borderRadius:8, padding:"10px 14px", marginBottom:14 },
   wlFormWrap:    { background:"rgba(255,255,255,0.02)", border:"1px solid rgba(255,255,255,0.06)", borderRadius:10, padding:"14px" },
+  // Ticket history styles
   thRow:         { display:"flex", gap:12, padding:"12px 14px", background:"#16161f", border:"1px solid rgba(255,255,255,0.06)", borderRadius:10 },
   thIcon:        { width:30, height:30, borderRadius:8, display:"flex", alignItems:"center", justifyContent:"center", fontSize:14, flexShrink:0 },
   input:         { width:"100%", background:"#16161f", border:"1.5px solid #2a2a3a", borderRadius:9, padding:"10px 13px", color:"#e0e0f0", fontSize:13, outline:"none", fontFamily:"inherit", transition:"border-color .15s" },

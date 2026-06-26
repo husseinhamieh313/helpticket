@@ -3,25 +3,25 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import React from "react";
 import api from "../utils/api";
-import NotificationCenter from "../components/NotificationCenter";
 
 const ROLE_COLORS = { Admin:"#ef4444", "IT Support Agent":"#3b82f6", Employee:"#22c55e", Manager:"#f59e0b" };
 const ROLE_ICONS  = { Admin:"🛡️", "IT Support Agent":"🔧", Employee:"👤", Manager:"📊" };
 const PRIORITY_COLORS = { Critical:"#ef4444", High:"#f59e0b", Medium:"#3b82f6", Low:"#6b7280" };
 const STATUS_COLORS   = { Open:"#3b82f6", "In Progress":"#f59e0b", Resolved:"#22c55e", Pending:"#6b7280", Closed:"#374151" };
 
-const StatCard = ({ label, value, sub, icon, color, onClick }) => (
+const StatCard = ({ label, value, sub, icon, color, onClick, highlight }) => (
   <div onClick={onClick}
-    style={{ background:"#1e1e2e", border:"1px solid rgba(255,255,255,0.07)", borderRadius:14,
-      padding:"20px 22px", cursor: onClick ? "pointer" : "default" }}
-    onMouseEnter={e => { if(onClick) e.currentTarget.style.borderColor="rgba(255,255,255,0.15)"; }}
-    onMouseLeave={e => { if(onClick) e.currentTarget.style.borderColor="rgba(255,255,255,0.07)"; }}>
+    style={{ background: highlight ? "rgba(239,68,68,.06)" : "#1e1e2e",
+      border: highlight ? "1px solid rgba(239,68,68,.3)" : "1px solid rgba(255,255,255,0.07)",
+      borderRadius:14, padding:"20px 22px", cursor: onClick ? "pointer" : "default" }}
+    onMouseEnter={e => { if(onClick) e.currentTarget.style.borderColor = highlight ? "rgba(239,68,68,.5)" : "rgba(255,255,255,0.15)"; }}
+    onMouseLeave={e => { if(onClick) e.currentTarget.style.borderColor = highlight ? "rgba(239,68,68,.3)" : "rgba(255,255,255,0.07)"; }}>
     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:12 }}>
       <span style={{ fontSize:11, fontWeight:600, color:"#6666aa", textTransform:"uppercase", letterSpacing:".06em" }}>{label}</span>
       <span style={{ fontSize:20 }}>{icon}</span>
     </div>
     <div style={{ fontSize:30, fontWeight:800, color, letterSpacing:"-0.03em", lineHeight:1 }}>{value}</div>
-    {sub && <div style={{ fontSize:12, color:"#5555aa", marginTop:6 }}>{sub}</div>}
+    {sub && <div style={{ fontSize:12, color: highlight ? "#fca5a5" : "#5555aa", marginTop:6 }}>{sub}</div>}
   </div>
 );
 
@@ -48,7 +48,7 @@ export default function DashboardPage() {
   const navigate  = useNavigate();
   const location  = useLocation();
 
-  const [stats,        setStats]        = useState({ open:"-", in_progress:"-", resolved:"-", total:"-" });
+  const [stats,        setStats]        = useState({ open:"-", in_progress:"-", resolved:"-", total:"-", breached:"-" });
   const [recentTickets,setRecentTickets]= useState([]);
   const [loading,      setLoading]      = useState(true);
   const [time,         setTime]         = useState(new Date());
@@ -65,9 +65,10 @@ export default function DashboardPage() {
         const tickets = res.data.tickets || [];
         const open        = tickets.filter(t => t.status === "Open").length;
         const in_progress = tickets.filter(t => t.status === "In Progress").length;
-        const resolved    = tickets.filter(t => t.status === "Resolved").length;
-        const total       = tickets.length;
-        setStats({ open, in_progress, resolved, total });
+        const resolved     = tickets.filter(t => t.status === "Resolved").length;
+        const total        = tickets.length;
+        const breached      = tickets.filter(t => t.is_breached).length;
+        setStats({ open, in_progress, resolved, total, breached });
         setRecentTickets(tickets.slice(0, 5));
       } catch (err) {
         console.error("Dashboard fetch error:", err);
@@ -80,40 +81,41 @@ export default function DashboardPage() {
 
   const roleColor = ROLE_COLORS[user?.role] || "#3b82f6";
   const roleIcon  = ROLE_ICONS[user?.role]  || "👤";
-  const isAdminOrManager = ["Admin","Manager"].includes(user?.role);
-  const canSeeActivity = ["IT Support Agent","Admin","Manager"].includes(user?.role);
 
   const quickActions = {
     Employee: [
       { icon:"🎫", label:"Submit a ticket",  desc:"Report a new IT issue",       color:"#3b82f6", path:"/tickets/new" },
       { icon:"📋", label:"My tickets",       desc:"Track your open requests",     color:"#22c55e", path:"/tickets"     },
-      { icon:"📊", label:"Analytics",        desc:"View your ticket stats",       color:"#8b5cf6", path:"/analytics"   },
+      { icon:"📚", label:"Knowledge base",   desc:"Find answers quickly",         color:"#f59e0b", path:"/kb"          },
     ],
     "IT Support Agent": [
       { icon:"📋", label:"All tickets",      desc:"View and manage tickets",      color:"#3b82f6", path:"/tickets"     },
-      { icon:"📊", label:"Analytics",        desc:"Performance & resolution stats",color:"#8b5cf6", path:"/analytics"  },
-      { icon:"📝", label:"Activity logs",    desc:"Your work sessions",           color:"#22c55e", path:"/activity"    },
+      { icon:"⚡", label:"Unassigned",       desc:"Pick up open tickets",         color:"#ef4444", path:"/tickets"     },
+      { icon:"📊", label:"My performance",   desc:"Resolution stats",             color:"#22c55e", path:"/reports"     },
     ],
     Manager: [
-      { icon:"📊", label:"Analytics",        desc:"Team analytics & KPIs",        color:"#8b5cf6", path:"/analytics"   },
+      { icon:"🔍", label:"Ticket History",   desc:"Full audit trail",             color:"#8b5cf6", path:"/history"     },
       { icon:"👥", label:"Team Overview",    desc:"Monitor team workload",        color:"#3b82f6", path:"/manager"     },
-      { icon:"🔍", label:"Ticket History",   desc:"Full audit trail",             color:"#f59e0b", path:"/history"     },
+      { icon:"📊", label:"Reports",          desc:"Team analytics & SLA",         color:"#f59e0b", path:"/reports"     },
     ],
     Admin: [
       { icon:"📋", label:"All tickets",      desc:"View and manage all tickets",  color:"#3b82f6", path:"/tickets"     },
-      { icon:"📊", label:"Analytics",        desc:"Full system analytics",        color:"#8b5cf6", path:"/analytics"   },
-      { icon:"🔍", label:"Ticket History",   desc:"Full audit trail",             color:"#f59e0b", path:"/history"     },
+      { icon:"🔍", label:"Ticket History",   desc:"Full audit trail of all actions", color:"#8b5cf6", path:"/history"  },
+      { icon:"📊", label:"Full reports",     desc:"All system analytics",         color:"#f59e0b", path:"/reports"     },
     ],
   };
 
-  const actions   = quickActions[user?.role] || quickActions["Employee"];
-  const canCreate = ["Employee","IT Support Agent","Admin"].includes(user?.role);
-  const greeting  = new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening";
+  const actions      = quickActions[user?.role] || quickActions["Employee"];
+  const canCreate    = ["Employee","IT Support Agent","Admin"].includes(user?.role);
+  const isAdminOrManager = ["Admin","Manager"].includes(user?.role);
+  const greeting     = new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening";
+
+  const isAgent = user?.role === "IT Support Agent";
+  const canSeeActivity = ["IT Support Agent","Admin","Manager"].includes(user?.role);
 
   const navItems = [
     { label:"Dashboard",      path:"/dashboard" },
     { label:"Tickets",        path:"/tickets"   },
-    { label:"📊 Analytics",   path:"/analytics" },
     ...(canSeeActivity ? [{ label:"📝 Activity", path:"/activity" }] : []),
     ...(isAdminOrManager ? [{ label:"🔍 History", path:"/history" }] : []),
     ...(isAdminOrManager ? [{ label:"Team Overview", path:"/manager" }] : []),
@@ -146,7 +148,7 @@ export default function DashboardPage() {
         </div>
         <div style={st.topbarRight}>
           <span style={st.clock}>{time.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" })}</span>
-          <NotificationCenter />
+          <button style={st.notifBtn}>🔔<span style={st.notifDot} /></button>
           <div style={st.userMenu}>
             <div style={{ ...st.roleTag, background:roleColor+"20", color:roleColor }}>
               {roleIcon} {user?.role}
@@ -189,7 +191,12 @@ export default function DashboardPage() {
             onClick={() => navigate("/tickets")} />
           <StatCard label="Total tickets"  value={loading ? "…" : stats.total}
             sub="All time" icon="📋" color="#8b5cf6"
-            onClick={() => navigate("/analytics")} />
+            onClick={() => navigate("/tickets")} />
+          <StatCard label="SLA breached"   value={loading ? "…" : stats.breached}
+            sub={stats.breached > 0 ? "Past their deadline" : "All within SLA"}
+            icon="⏰" color="#ef4444"
+            onClick={() => navigate("/tickets")}
+            highlight={!loading && stats.breached > 0} />
         </div>
 
         <div style={st.contentGrid}>
@@ -224,6 +231,12 @@ export default function DashboardPage() {
                     onMouseLeave={e => e.currentTarget.style.background="transparent"}>
                     <span style={st.ticketRef}>{t.reference_no}</span>
                     <span style={st.ticketTitle}>{t.title}</span>
+                    {t.is_breached && (
+                      <span style={{ fontSize:9, fontWeight:700, padding:"2px 7px", borderRadius:99,
+                        background:"rgba(239,68,68,.15)", color:"#ef4444", whiteSpace:"nowrap" }}>
+                        ⏰ SLA
+                      </span>
+                    )}
                     <span style={{ fontSize:10, fontWeight:600, padding:"2px 8px", borderRadius:99,
                       background:pc+"22", color:pc }}>{t.priority}</span>
                     <span style={{ fontSize:10, fontWeight:600, padding:"2px 8px", borderRadius:99,
@@ -250,7 +263,7 @@ export default function DashboardPage() {
           </div>
         </div>
       </main>
-      <style>{`* { box-sizing:border-box; } button { font-family:inherit; } @keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      <style>{`* { box-sizing:border-box; } button { font-family:inherit; }`}</style>
     </div>
   );
 }
@@ -267,8 +280,12 @@ const st = {
   nav:          { display:"flex", gap:2 },
   navBtn:       { fontSize:13, padding:"6px 10px", borderRadius:7, transition:"all .15s",
     cursor:"pointer", border:"none", fontWeight:500 },
-  topbarRight:  { display:"flex", alignItems:"center", gap:12 },
+  topbarRight:  { display:"flex", alignItems:"center", gap:16 },
   clock:        { fontSize:12, color:"#5555aa", fontFamily:"monospace" },
+  notifBtn:     { background:"none", border:"none", cursor:"pointer", fontSize:16,
+    position:"relative", color:"#e0e0f0", padding:4 },
+  notifDot:     { position:"absolute", top:4, right:2, width:7, height:7,
+    borderRadius:"50%", background:"#ef4444", border:"2px solid #13131f" },
   userMenu:     { display:"flex", alignItems:"center", gap:10 },
   roleTag:      { fontSize:11, fontWeight:600, padding:"3px 10px", borderRadius:99,
     display:"flex", alignItems:"center", gap:5 },
@@ -281,7 +298,7 @@ const st = {
   welcomeSub:   { fontSize:13, color:"#5555aa" },
   newTicketBtn: { background:"linear-gradient(135deg,#3b82f6,#6366f1)", border:"none",
     borderRadius:10, padding:"11px 20px", color:"#fff", fontSize:14, fontWeight:700, cursor:"pointer" },
-  statsGrid:    { display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:14, marginBottom:24 },
+  statsGrid:    { display:"grid", gridTemplateColumns:"repeat(5,1fr)", gap:14, marginBottom:24 },
   contentGrid:  { display:"grid", gridTemplateColumns:"1fr 340px", gap:16 },
   tableCard:    { background:"#1e1e2e", border:"1px solid rgba(255,255,255,0.07)", borderRadius:14, padding:"20px 22px" },
   actionsCard:  { background:"#1e1e2e", border:"1px solid rgba(255,255,255,0.07)", borderRadius:14, padding:"20px 22px" },

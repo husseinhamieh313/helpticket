@@ -17,6 +17,14 @@ const Badge = ({ label, colorMap }) => {
   );
 };
 
+const SlaBadge = () => (
+  <span style={{ fontSize:10, fontWeight:700, padding:"2px 9px", borderRadius:99,
+    background:"rgba(239,68,68,.15)", color:"#ef4444", whiteSpace:"nowrap",
+    display:"inline-flex", alignItems:"center", gap:3 }}>
+    ⏰ SLA breached
+  </span>
+);
+
 export default function TicketListPage() {
   const { user } = useAuth();
   const navigate  = useNavigate();
@@ -27,6 +35,7 @@ export default function TicketListPage() {
   const [filters,  setFilters]  = useState({ status:"", priority:"", category:"" });
   const [meta,     setMeta]     = useState({ categories:[], priorities:[], statuses:[] });
   const [deleting, setDeleting] = useState(null);
+  const [slaOnly,  setSlaOnly]  = useState(false);
 
   const role = user?.role;
   const canCreate = ["Employee","IT Support Agent","Admin"].includes(role);
@@ -71,6 +80,9 @@ export default function TicketListPage() {
     return "All Tickets";
   };
 
+  const breachCount = tickets.filter(t => t.is_breached).length;
+  const visibleTickets = slaOnly ? tickets.filter(t => t.is_breached) : tickets;
+
   return (
     <div style={s.root}>
       {/* Header */}
@@ -85,6 +97,17 @@ export default function TicketListPage() {
           </button>
         )}
       </div>
+
+      {/* SLA breach summary banner */}
+      {breachCount > 0 && (
+        <div style={s.slaBanner} onClick={() => setSlaOnly(v => !v)}>
+          <span>⏰</span>
+          <span>
+            <strong>{breachCount}</strong> ticket{breachCount !== 1 ? "s" : ""} past SLA deadline.
+          </span>
+          <span style={s.slaToggleHint}>{slaOnly ? "Showing breached only — click to show all" : "Click to filter to breached only"}</span>
+        </div>
+      )}
 
       {/* Filters */}
       <div style={s.filterRow}>
@@ -109,9 +132,9 @@ export default function TicketListPage() {
           <option value="">All categories</option>
           {meta.categories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
         </select>
-        {(search || filters.status || filters.priority || filters.category) && (
+        {(search || filters.status || filters.priority || filters.category || slaOnly) && (
           <button style={s.clearBtn}
-            onClick={() => { setSearch(""); setFilters({ status:"", priority:"", category:"" }); }}>
+            onClick={() => { setSearch(""); setFilters({ status:"", priority:"", category:"" }); setSlaOnly(false); }}>
             Clear
           </button>
         )}
@@ -121,16 +144,20 @@ export default function TicketListPage() {
       <div style={s.tableWrap}>
         {loading ? (
           <div style={s.empty}>Loading tickets...</div>
-        ) : tickets.length === 0 ? (
+        ) : visibleTickets.length === 0 ? (
           <div style={s.empty}>
             <div style={{ fontSize:32, marginBottom:10 }}>🎫</div>
-            <div style={{ fontWeight:600, color:"var(--c-text)", marginBottom:6 }}>No tickets found</div>
+            <div style={{ fontWeight:600, color:"var(--c-text)", marginBottom:6 }}>
+              {slaOnly ? "No breached tickets" : "No tickets found"}
+            </div>
             <div style={{ fontSize:12, color:"#5555aa" }}>
-              {role === "IT Support Agent"
-                ? "No tickets are assigned to you yet."
-                : canCreate
-                  ? "Create your first ticket to get started."
-                  : "No tickets match your filters."}
+              {slaOnly
+                ? "Nice — nothing is past its SLA deadline right now."
+                : role === "IT Support Agent"
+                  ? "No tickets are assigned to you yet."
+                  : canCreate
+                    ? "Create your first ticket to get started."
+                    : "No tickets match your filters."}
             </div>
           </div>
         ) : (
@@ -143,20 +170,23 @@ export default function TicketListPage() {
               </tr>
             </thead>
             <tbody>
-              {tickets.map(t => (
-                <tr key={t.id} style={s.tr}
+              {visibleTickets.map(t => (
+                <tr key={t.id} style={{ ...s.tr, ...(t.is_breached ? s.trBreached : {}) }}
                   onClick={() => navigate(`/tickets/${t.id}`)}
                   onMouseEnter={e => e.currentTarget.style.background = "#1e1e2e"}
-                  onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                  onMouseLeave={e => e.currentTarget.style.background = t.is_breached ? "rgba(239,68,68,.04)" : "transparent"}>
                   <td style={s.td}>
                     <span style={{ fontFamily:"monospace", fontSize:11, color:"#3b82f6", fontWeight:700 }}>
                       {t.reference_no}
                     </span>
                   </td>
                   <td style={{ ...s.td, maxWidth:220 }}>
-                    <div style={{ fontSize:13, fontWeight:500, color:"#e0e0f0",
-                      overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                      {t.title}
+                    <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                      <div style={{ fontSize:13, fontWeight:500, color:"#e0e0f0",
+                        overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                        {t.title}
+                      </div>
+                      {t.is_breached && <SlaBadge />}
                     </div>
                     <div style={{ fontSize:11, color:"#5555aa", marginTop:2 }}>
                       by {t.created_by_name}
@@ -199,11 +229,15 @@ export default function TicketListPage() {
 
 const s = {
   root:       { padding:"28px 32px", maxWidth:1200, margin:"0 auto", fontFamily:"'DM Sans','Segoe UI',sans-serif" },
-  header:     { display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:22 },
+  header:     { display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:18 },
   title:      { fontSize:22, fontWeight:800, color:"#fff", letterSpacing:"-0.02em", marginBottom:3 },
   sub:        { fontSize:12, color:"#5555aa" },
   btnPrimary: { background:"linear-gradient(135deg,#3b82f6,#6366f1)", border:"none", borderRadius:9,
     padding:"10px 18px", color:"#fff", fontSize:13, fontWeight:700, cursor:"pointer" },
+  slaBanner:  { display:"flex", alignItems:"center", gap:10, background:"rgba(239,68,68,.08)",
+    border:"1px solid rgba(239,68,68,.25)", borderRadius:10, padding:"11px 16px", marginBottom:16,
+    cursor:"pointer", color:"#fca5a5", fontSize:13 },
+  slaToggleHint: { marginLeft:"auto", fontSize:11, color:"#ef4444", opacity:0.8 },
   filterRow:  { display:"flex", gap:10, marginBottom:18, flexWrap:"wrap" },
   search:     { flex:1, minWidth:200, background:"#16161f", border:"1px solid #2a2a3a", borderRadius:9,
     padding:"9px 14px", color:"#e0e0f0", fontSize:13, outline:"none", fontFamily:"inherit" },
@@ -216,6 +250,7 @@ const s = {
   th:         { textAlign:"left", fontSize:10, fontWeight:600, color:"#5555aa", textTransform:"uppercase",
     letterSpacing:".06em", padding:"12px 14px", borderBottom:"1px solid rgba(255,255,255,0.06)" },
   tr:         { cursor:"pointer", transition:"background .12s" },
+  trBreached: { background:"rgba(239,68,68,.04)" },
   td:         { padding:"11px 14px", borderBottom:"1px solid rgba(255,255,255,0.04)", verticalAlign:"middle" },
   catBadge:   { fontSize:11, color:"#8888bb", background:"rgba(255,255,255,0.06)", padding:"2px 8px", borderRadius:6 },
   iconBtn:    { background:"none", border:"none", cursor:"pointer", fontSize:14, padding:"3px 5px", borderRadius:6, lineHeight:1 },
