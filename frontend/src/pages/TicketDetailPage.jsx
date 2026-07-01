@@ -720,7 +720,7 @@ const s = {
   sectionTitle:  { fontSize:12, fontWeight:700, color:"#8888bb", textTransform:"uppercase", letterSpacing:".06em", marginBottom:14 },
   tabs:          { display:"flex", gap:4, borderBottom:"1px solid rgba(255,255,255,0.07)", paddingBottom:0, flexWrap:"wrap" },
   tab:           { background:"none", border:"none", borderBottom:"2px solid transparent", padding:"8px 14px", fontSize:12, fontWeight:500, color:"#6666aa", cursor:"pointer", fontFamily:"inherit", marginBottom:"-1px" },
-  tabActive:     { color:"#3b82f6", borderBottomColor:"#3b82f6" },
+  tabActive:     { color:"#3b82f6", borderBottom:"2px solid #3b82f6" },
   commentCard:   { background:"#16161f", border:"1px solid rgba(255,255,255,0.06)", borderRadius:10, padding:"12px 14px" },
   commentInternal:{ background:"rgba(245,158,11,0.05)", border:"1px solid rgba(245,158,11,0.2)" },
   internalTag:   { fontSize:9, fontWeight:700, color:"#f59e0b", background:"#f59e0b22", padding:"1px 7px", borderRadius:99 },

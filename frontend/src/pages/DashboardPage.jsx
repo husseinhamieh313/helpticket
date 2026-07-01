@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import React from "react";
 import api from "../utils/api";
+import NotificationCenter from "../components/NotificationCenter";
 
 const ROLE_COLORS = { Admin:"#ef4444", "IT Support Agent":"#3b82f6", Employee:"#22c55e", Manager:"#f59e0b" };
 const ROLE_ICONS  = { Admin:"🛡️", "IT Support Agent":"🔧", Employee:"👤", Manager:"📊" };
@@ -98,22 +99,22 @@ export default function DashboardPage() {
     "IT Support Agent": [
       { icon:"📋", label:"All tickets",      desc:"View and manage tickets",      color:"#3b82f6", path:"/tickets"     },
       { icon:"⚡", label:"Unassigned",       desc:"Pick up open tickets",         color:"#ef4444", path:"/tickets"     },
-      { icon:"📊", label:"My performance",   desc:"Resolution stats",             color:"#22c55e", path:"/reports"     },
+      { icon:"📊", label:"My performance",   desc:"Resolution stats",             color:"#22c55e", path:"/analytics"     },
     ],
     Manager: [
       { icon:"🔍", label:"Ticket History",   desc:"Full audit trail",             color:"#8b5cf6", path:"/history"     },
       { icon:"👥", label:"Team Overview",    desc:"Monitor team workload",        color:"#3b82f6", path:"/manager"     },
-      { icon:"📊", label:"Reports",          desc:"Team analytics & SLA",         color:"#f59e0b", path:"/reports"     },
+      { icon:"📊", label:"Reports",          desc:"Team analytics & SLA",         color:"#f59e0b", path:"/analytics"     },
     ],
     Admin: [
       { icon:"📋", label:"All tickets",      desc:"View and manage all tickets",  color:"#3b82f6", path:"/tickets"     },
       { icon:"🔍", label:"Ticket History",   desc:"Full audit trail of all actions", color:"#8b5cf6", path:"/history"  },
-      { icon:"📊", label:"Full reports",     desc:"All system analytics",         color:"#f59e0b", path:"/reports"     },
+      { icon:"📊", label:"Full reports",     desc:"All system analytics",         color:"#f59e0b", path:"/analytics"     },
     ],
   };
 
   const actions      = quickActions[user?.role] || quickActions["Employee"];
-  const canCreate    = ["Employee","IT Support Agent","Admin"].includes(user?.role);
+  const canCreate    = ["Employee","Admin"].includes(user?.role);
   const isAdminOrManager = ["Admin","Manager"].includes(user?.role);
   const greeting     = new Date().getHours() < 12 ? "morning" : new Date().getHours() < 18 ? "afternoon" : "evening";
 
@@ -123,6 +124,8 @@ export default function DashboardPage() {
   const navItems = [
     { label:"Dashboard",      path:"/dashboard" },
     { label:"Tickets",        path:"/tickets"   },
+    { label:"📚 Knowledge Base", path:"/kb" },
+    { label:"📊 Analytics",   path:"/analytics" },
     ...(canSeeActivity ? [{ label:"📝 Activity", path:"/activity" }] : []),
     ...(isAdminOrManager ? [{ label:"🔍 History", path:"/history" }] : []),
     ...(isAdminOrManager ? [{ label:"Team Overview", path:"/manager" }] : []),
@@ -132,38 +135,48 @@ export default function DashboardPage() {
     <div style={st.root}>
       {/* Topbar */}
       <header style={st.topbar}>
-        <div style={st.topbarLeft}>
+        <div style={st.topbarTop}>
           <div style={st.logo}>
             <div style={st.logoIcon}>⚡</div>
             <span style={st.logoText}>HelpDesk</span>
           </div>
-          <nav style={st.nav}>
-            {navItems.map(item => {
+          <div style={st.topbarRight}>
+            <span style={st.clock}>{time.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" })}</span>
+            <NotificationCenter />
+            <div style={st.userMenu}>
+              <div style={{ ...st.roleTag, background:roleColor+"20", color:roleColor }}>
+                {roleIcon} {user?.role}
+              </div>
+              <span style={st.userName}>{user?.full_name}</span>
+              <button onClick={logout} style={st.logoutBtn}>Sign out</button>
+            </div>
+          </div>
+        </div>
+        <nav style={st.nav}>
+          <div style={st.navGroup}>
+            {navItems.slice(0, 2).map(item => {
               const active = location.pathname === item.path;
               return (
-                <button key={item.label}
-                  onClick={() => navigate(item.path)}
-                  style={{ ...st.navBtn, color: active ? "#fff" : "#6666aa",
-                    background: active ? "rgba(255,255,255,0.08)" : "none" }}
-                  onMouseEnter={e => { if(!active) e.currentTarget.style.color="#fff"; }}
-                  onMouseLeave={e => { if(!active) e.currentTarget.style.color="#6666aa"; }}>
+                <button key={item.label} onClick={() => navigate(item.path)}
+                  style={{ ...st.navBtn, ...(active ? st.navBtnActive : {}) }}>
                   {item.label}
                 </button>
               );
             })}
-          </nav>
-        </div>
-        <div style={st.topbarRight}>
-          <span style={st.clock}>{time.toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" })}</span>
-          <button style={st.notifBtn}>🔔<span style={st.notifDot} /></button>
-          <div style={st.userMenu}>
-            <div style={{ ...st.roleTag, background:roleColor+"20", color:roleColor }}>
-              {roleIcon} {user?.role}
-            </div>
-            <span style={st.userName}>{user?.full_name}</span>
-            <button onClick={logout} style={st.logoutBtn}>Sign out</button>
           </div>
-        </div>
+          <div style={st.navDivider} />
+          <div style={st.navGroup}>
+            {navItems.slice(2).map(item => {
+              const active = location.pathname === item.path;
+              return (
+                <button key={item.label} onClick={() => navigate(item.path)}
+                  style={{ ...st.navBtn, ...(active ? st.navBtnActive : {}) }}>
+                  {item.label}
+                </button>
+              );
+            })}
+          </div>
+        </nav>
       </header>
 
       {/* Main */}
@@ -280,22 +293,20 @@ export default function DashboardPage() {
 
 const st = {
   root:         { minHeight:"100vh", background:"#0f0f1a", fontFamily:"'DM Sans','Segoe UI',sans-serif", color:"#e0e0f0" },
-  topbar:       { display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 32px",
-    height:58, background:"#13131f", borderBottom:"1px solid rgba(255,255,255,0.07)", position:"sticky", top:0, zIndex:100 },
-  topbarLeft:   { display:"flex", alignItems:"center", gap:28 },
+  topbar:       { background:"#13131f", borderBottom:"1px solid rgba(255,255,255,0.07)", position:"sticky", top:0, zIndex:100 },
+  topbarTop:    { display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px 32px 10px" },
   logo:         { display:"flex", alignItems:"center", gap:8 },
   logoIcon:     { width:30, height:30, borderRadius:8, background:"linear-gradient(135deg,#3b82f6,#8b5cf6)",
     display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 },
   logoText:     { fontSize:16, fontWeight:700, color:"#fff" },
-  nav:          { display:"flex", gap:2 },
-  navBtn:       { fontSize:13, padding:"6px 10px", borderRadius:7, transition:"all .15s",
-    cursor:"pointer", border:"none", fontWeight:500 },
+  nav:          { display:"flex", alignItems:"center", gap:14, padding:"0 32px 14px", flexWrap:"wrap" },
+  navGroup:     { display:"flex", alignItems:"center", gap:4, flexWrap:"wrap" },
+  navDivider:   { width:1, height:18, background:"rgba(255,255,255,0.08)", flexShrink:0 },
+  navBtn:       { fontSize:13, padding:"7px 14px", borderRadius:8, transition:"all .15s",
+    cursor:"pointer", border:"none", fontWeight:500, whiteSpace:"nowrap", color:"#6666aa", background:"none" },
+  navBtnActive: { color:"#fff", background:"rgba(59,130,246,0.15)" },
   topbarRight:  { display:"flex", alignItems:"center", gap:16 },
   clock:        { fontSize:12, color:"#5555aa", fontFamily:"monospace" },
-  notifBtn:     { background:"none", border:"none", cursor:"pointer", fontSize:16,
-    position:"relative", color:"#e0e0f0", padding:4 },
-  notifDot:     { position:"absolute", top:4, right:2, width:7, height:7,
-    borderRadius:"50%", background:"#ef4444", border:"2px solid #13131f" },
   userMenu:     { display:"flex", alignItems:"center", gap:10 },
   roleTag:      { fontSize:11, fontWeight:600, padding:"3px 10px", borderRadius:99,
     display:"flex", alignItems:"center", gap:5 },

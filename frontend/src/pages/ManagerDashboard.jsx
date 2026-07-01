@@ -1,6 +1,6 @@
 import React from "react";
 import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import api from "../utils/api";
 import ManageUsersPanel from "../components/ManageUsersPanel";
@@ -9,6 +9,7 @@ const PRIORITY_COLORS = { Critical:"#ef4444", High:"#f59e0b", Medium:"#3b82f6", 
 
 export default function ManagerDashboard() {
   const navigate      = useNavigate();
+  const location       = useLocation();
   const { user, logout } = useAuth();
 
   const isAdmin = user?.role === "Admin";
@@ -59,6 +60,8 @@ export default function ManagerDashboard() {
   const navLinks = [
     ["Dashboard",    "/dashboard"],
     ["Tickets",      "/tickets"],
+    ["📚 Knowledge Base", "/kb"],
+    ["📊 Analytics", "/analytics"],
     ["📝 Activity",  "/activity"],
     ["Team Overview","/manager"],
     ["🔍 History",   "/history"],
@@ -68,26 +71,36 @@ export default function ManagerDashboard() {
     <div style={s.root}>
       {/* Topbar */}
       <header style={s.topbar}>
-        <div style={s.topbarLeft}>
+        <div style={s.topbarTop}>
           <div style={s.logo}>
             <div style={s.logoIcon}>⚡</div>
             <span style={s.logoText}>HelpDesk</span>
           </div>
-          <nav style={s.nav}>
-            {navLinks.map(([label, path]) => (
+          <div style={s.topbarRight}>
+            <div style={{ ...s.roleTag, background:"#f59e0b20", color:"#f59e0b" }}>📊 {user?.role}</div>
+            <span style={s.userName}>{user?.full_name}</span>
+            <button onClick={logout} style={s.logoutBtn}>Sign out</button>
+          </div>
+        </div>
+        <nav style={s.nav}>
+          <div style={s.navGroup}>
+            {navLinks.slice(0, 2).map(([label, path]) => (
               <button key={label} onClick={() => navigate(path)}
-                style={{ ...s.navBtn, color: window.location.pathname === path ? "#fff" : "#6666aa",
-                  background: window.location.pathname === path ? "rgba(255,255,255,0.08)" : "none" }}>
+                style={{ ...s.navBtn, ...(location.pathname === path ? s.navBtnActive : {}) }}>
                 {label}
               </button>
             ))}
-          </nav>
-        </div>
-        <div style={s.topbarRight}>
-          <div style={{ ...s.roleTag, background:"#f59e0b20", color:"#f59e0b" }}>📊 {user?.role}</div>
-          <span style={s.userName}>{user?.full_name}</span>
-          <button onClick={logout} style={s.logoutBtn}>Sign out</button>
-        </div>
+          </div>
+          <div style={s.navDivider} />
+          <div style={s.navGroup}>
+            {navLinks.slice(2).map(([label, path]) => (
+              <button key={label} onClick={() => navigate(path)}
+                style={{ ...s.navBtn, ...(location.pathname === path ? s.navBtnActive : {}) }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </nav>
       </header>
 
       <main style={s.main}>
@@ -267,13 +280,18 @@ export default function ManagerDashboard() {
 
 const s = {
   root:          { minHeight:"100vh", background:"#0f0f1a", fontFamily:"'DM Sans','Segoe UI',sans-serif", color:"#e0e0f0" },
-  topbar:        { display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 32px", height:58, background:"#13131f", borderBottom:"1px solid rgba(255,255,255,0.07)", position:"sticky", top:0, zIndex:100 },
+  topbar:        { background:"#13131f", borderBottom:"1px solid rgba(255,255,255,0.07)", position:"sticky", top:0, zIndex:100 },
+  topbarTop:     { display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px 32px 10px" },
   topbarLeft:    { display:"flex", alignItems:"center", gap:24 },
   logo:          { display:"flex", alignItems:"center", gap:8 },
   logoIcon:      { width:30, height:30, borderRadius:8, background:"linear-gradient(135deg,#3b82f6,#8b5cf6)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 },
   logoText:      { fontSize:16, fontWeight:700, color:"#fff" },
-  nav:           { display:"flex", gap:2 },
-  navBtn:        { fontSize:13, padding:"6px 10px", borderRadius:7, transition:"all .15s", cursor:"pointer", border:"none", fontWeight:500 },
+  nav:           { display:"flex", alignItems:"center", gap:14, padding:"0 32px 14px", flexWrap:"wrap" },
+  navGroup:      { display:"flex", alignItems:"center", gap:4, flexWrap:"wrap" },
+  navDivider:    { width:1, height:18, background:"rgba(255,255,255,0.08)", flexShrink:0 },
+  navBtn:        { fontSize:13, padding:"7px 14px", borderRadius:8, transition:"all .15s", cursor:"pointer",
+    border:"none", fontWeight:500, whiteSpace:"nowrap", color:"#6666aa", background:"none" },
+  navBtnActive:  { color:"#fff", background:"rgba(59,130,246,0.15)" },
   topbarRight:   { display:"flex", alignItems:"center", gap:12 },
   roleTag:       { fontSize:11, fontWeight:600, padding:"3px 10px", borderRadius:99 },
   userName:      { fontSize:13, fontWeight:600, color:"#c0c0d0" },
@@ -286,7 +304,7 @@ const s = {
   refreshBtn:    { background:"#1e1e2e", border:"1px solid #2a2a3a", borderRadius:8, padding:"8px 16px", color:"#8888bb", fontSize:12, cursor:"pointer" },
   tabBar:        { display:"flex", gap:6, marginBottom:20, borderBottom:"1px solid rgba(255,255,255,0.07)", paddingBottom:0 },
   tabBtn:        { background:"none", border:"none", borderBottom:"2px solid transparent", padding:"9px 4px", marginRight:18, fontSize:13, fontWeight:600, color:"#6666aa", cursor:"pointer", fontFamily:"inherit", marginBottom:"-1px" },
-  tabBtnActive:  { color:"#3b82f6", borderBottomColor:"#3b82f6" },
+  tabBtnActive:  { color:"#3b82f6", borderBottom:"2px solid #3b82f6" },
   errorBanner:   { background:"rgba(239,68,68,.1)", border:"1px solid rgba(239,68,68,.25)", borderRadius:8, padding:"9px 14px", color:"#fca5a5", fontSize:12, marginBottom:16 },
   successBanner: { background:"rgba(34,197,94,.1)", border:"1px solid rgba(34,197,94,.25)", borderRadius:8, padding:"9px 14px", color:"#86efac", fontSize:12, marginBottom:16 },
   grid:          { display:"grid", gridTemplateColumns:"1fr 1fr", gap:20, alignItems:"start" },

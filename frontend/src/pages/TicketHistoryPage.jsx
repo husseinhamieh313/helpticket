@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import React from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import api from "../utils/api";
 
@@ -24,6 +24,7 @@ const ROLE_COLORS = {
 
 export default function TicketHistoryPage() {
   const navigate    = useNavigate();
+  const location    = useLocation();
   const { user, logout } = useAuth();
 
   const [history,   setHistory]   = useState([]);
@@ -68,39 +69,52 @@ export default function TicketHistoryPage() {
     resolved: history.filter(h => h.action === "STATUS_CHANGED" && h.new_value === "Resolved").length,
   };
 
+  const navLinks = [
+    ["Dashboard",    "/dashboard"],
+    ["Tickets",      "/tickets"],
+    ["📚 Knowledge Base", "/kb"],
+    ["📊 Analytics", "/analytics"],
+    ["📝 Activity",  "/activity"],
+    ["🔍 History",   "/history"],
+    ...(user?.role === "Manager" || user?.role === "Admin" ? [["Team Overview", "/manager"]] : []),
+  ];
+
   return (
     <div style={s.root}>
       {/* Topbar */}
       <header style={s.topbar}>
-        <div style={s.topbarLeft}>
+        <div style={s.topbarTop}>
           <div style={s.logo}>
             <div style={s.logoIcon}>⚡</div>
             <span style={s.logoText}>HelpDesk</span>
           </div>
-          <nav style={s.nav}>
-            {[
-              ["Dashboard",    "/dashboard"],
-              ["Tickets",      "/tickets"],
-              ["📝 Activity",  "/activity"],
-              ["🔍 History",   "/history"],
-              ...(user?.role === "Manager" ? [["Team Overview", "/manager"]] : []),
-            ].map(([label, path]) => (
+          <div style={s.topbarRight}>
+            <div style={{ ...s.roleTag, background:"#ef444420", color:"#ef4444" }}>
+              🔍 {user?.role}
+            </div>
+            <span style={s.userName}>{user?.full_name}</span>
+            <button onClick={logout} style={s.logoutBtn}>Sign out</button>
+          </div>
+        </div>
+        <nav style={s.nav}>
+          <div style={s.navGroup}>
+            {navLinks.slice(0, 2).map(([label, path]) => (
               <button key={label} onClick={() => navigate(path)}
-                style={{ ...s.navBtn,
-                  color: window.location.pathname === path ? "#fff" : "#6666aa",
-                  background: window.location.pathname === path ? "rgba(255,255,255,0.08)" : "none" }}>
+                style={{ ...s.navBtn, ...(location.pathname === path ? s.navBtnActive : {}) }}>
                 {label}
               </button>
             ))}
-          </nav>
-        </div>
-        <div style={s.topbarRight}>
-          <div style={{ ...s.roleTag, background:"#ef444420", color:"#ef4444" }}>
-            🔍 {user?.role}
           </div>
-          <span style={s.userName}>{user?.full_name}</span>
-          <button onClick={logout} style={s.logoutBtn}>Sign out</button>
-        </div>
+          <div style={s.navDivider} />
+          <div style={s.navGroup}>
+            {navLinks.slice(2).map(([label, path]) => (
+              <button key={label} onClick={() => navigate(path)}
+                style={{ ...s.navBtn, ...(location.pathname === path ? s.navBtnActive : {}) }}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </nav>
       </header>
 
       <main style={s.main}>
@@ -247,15 +261,18 @@ export default function TicketHistoryPage() {
 
 const s = {
   root:        { minHeight:"100vh", background:"#0f0f1a", fontFamily:"'DM Sans','Segoe UI',sans-serif", color:"#e0e0f0" },
-  topbar:      { display:"flex", alignItems:"center", justifyContent:"space-between", padding:"0 32px", height:58,
-    background:"#13131f", borderBottom:"1px solid rgba(255,255,255,0.07)", position:"sticky", top:0, zIndex:100 },
-  topbarLeft:  { display:"flex", alignItems:"center", gap:24 },
+  topbar:      { background:"#13131f", borderBottom:"1px solid rgba(255,255,255,0.07)", position:"sticky", top:0, zIndex:100 },
+  topbarTop:   { display:"flex", alignItems:"center", justifyContent:"space-between", padding:"12px 32px 10px" },
   logo:        { display:"flex", alignItems:"center", gap:8 },
   logoIcon:    { width:30, height:30, borderRadius:8, background:"linear-gradient(135deg,#3b82f6,#8b5cf6)",
     display:"flex", alignItems:"center", justifyContent:"center", fontSize:14 },
   logoText:    { fontSize:16, fontWeight:700, color:"#fff" },
-  nav:         { display:"flex", gap:2 },
-  navBtn:      { fontSize:13, padding:"6px 10px", borderRadius:7, cursor:"pointer", border:"none", fontWeight:500, transition:"all .15s" },
+  nav:         { display:"flex", alignItems:"center", gap:14, padding:"0 32px 14px", flexWrap:"wrap" },
+  navGroup:    { display:"flex", alignItems:"center", gap:4, flexWrap:"wrap" },
+  navDivider:  { width:1, height:18, background:"rgba(255,255,255,0.08)", flexShrink:0 },
+  navBtn:      { fontSize:13, padding:"7px 14px", borderRadius:8, cursor:"pointer", border:"none",
+    fontWeight:500, transition:"all .15s", whiteSpace:"nowrap", color:"#6666aa", background:"none" },
+  navBtnActive:{ color:"#fff", background:"rgba(59,130,246,0.15)" },
   topbarRight: { display:"flex", alignItems:"center", gap:12 },
   roleTag:     { fontSize:11, fontWeight:600, padding:"3px 10px", borderRadius:99 },
   userName:    { fontSize:13, fontWeight:600, color:"#c0c0d0" },

@@ -39,6 +39,49 @@ async function logHistory(ticketId, actorId, action, fieldName, oldVal, newVal, 
   );
 }
 
+// ─── HELPER: figure out who should be notified about a ticket event ──
+// Rule: all Admins, all Managers, the assigned agent (if any), and the
+// ticket creator — minus whoever performed the action (the actor never
+// gets notified about their own change).
+async function getNotifyTargets(ticketId, actorId) {
+  const [rows] = await db.query(
+    `SELECT t.created_by, t.assigned_to
+     FROM tickets t WHERE t.id = ?`,
+    [ticketId]
+  );
+  if (rows.length === 0) return [];
+
+  const { created_by, assigned_to } = rows[0];
+
+  const [staffRows] = await db.query(
+    `SELECT u.id FROM users u
+     JOIN roles r ON u.role_id = r.id
+     WHERE r.name IN ('Admin', 'Manager') AND u.is_active = 1`
+  );
+
+  const targetIds = new Set(staffRows.map(r => r.id));
+  if (created_by)  targetIds.add(created_by);
+  if (assigned_to) targetIds.add(assigned_to);
+  targetIds.delete(actorId); // never notify the actor about their own action
+
+  return [...targetIds];
+}
+
+// ─── HELPER: create notification rows for a set of target users ──
+async function notifyUsers(userIds, ticketId, type, message) {
+  if (!userIds || userIds.length === 0) return;
+  const values = userIds.map(() => `(UUID(), ?, ?, ?, ?, 0, NOW())`).join(", ");
+  const params = [];
+  for (const userId of userIds) {
+    params.push(userId, ticketId, type, message);
+  }
+  await db.query(
+    `INSERT INTO notifications (id, user_id, ticket_id, type, message, is_read, created_at)
+     VALUES ${values}`,
+    params
+  );
+}
+
 // ─── GET ALL TICKETS ─────────────────────────────────────────
 // Employee  → only tickets they created
 // Agent     → only tickets assigned to them
@@ -337,7 +380,7 @@ router.get("/:id", async (req, res) => {
 
 // ─── CREATE TICKET ────────────────────────────────────────────
 router.post("/",
-  authorizeRoles("Employee", "IT Support Agent", "Admin"),
+  authorizeRoles("Employee", "Admin"),
   [
     body("title").trim().notEmpty().withMessage("Title is required"),
     body("description").trim().notEmpty().withMessage("Description is required"),
@@ -420,6 +463,9 @@ router.put("/:id", async (req, res) => {
     const fields = [];
     const vals   = [];
 
+    // Fetch notify targets once up front; reused across whichever fields change below.
+    const notifyTargets = await getNotifyTargets(req.params.id, req.user.id);
+
     if (title && ["IT Support Agent","Admin"].includes(role) && !isAssigned) {
       if (title !== ticket.title) await logHistory(req.params.id, req.user.id, "FIELD_CHANGED", "title", ticket.title, title, null);
       fields.push("title = ?"); vals.push(title);
@@ -439,8 +485,11 @@ router.put("/:id", async (req, res) => {
     if (status_id && ["IT Support Agent","Manager","Admin"].includes(role)) {
       const [sRows] = await db.query("SELECT name FROM statuses WHERE id = ?", [status_id]);
       const newStatusName = sRows[0]?.name;
-      if (newStatusName && newStatusName !== ticket.status_name)
+      if (newStatusName && newStatusName !== ticket.status_name) {
         await logHistory(req.params.id, req.user.id, "STATUS_CHANGED", "status", ticket.status_name, newStatusName, null);
+        await notifyUsers(notifyTargets, req.params.id, "status_changed",
+          `[${ticket.reference_no}] Status changed from ${ticket.status_name} to ${newStatusName} by ${req.user.full_name}`);
+      }
       fields.push("status_id = ?"); vals.push(status_id);
       if (newStatusName === "Resolved") { fields.push("resolved_at = NOW()"); }
       else { fields.push("resolved_at = NULL"); }
@@ -449,8 +498,11 @@ router.put("/:id", async (req, res) => {
     if (priority_id && ["IT Support Agent","Admin"].includes(role)) {
       const [pRows] = await db.query("SELECT name FROM priorities WHERE id = ?", [priority_id]);
       const newPriorityName = pRows[0]?.name;
-      if (newPriorityName && newPriorityName !== ticket.priority_name)
+      if (newPriorityName && newPriorityName !== ticket.priority_name) {
         await logHistory(req.params.id, req.user.id, "FIELD_CHANGED", "priority", ticket.priority_name, newPriorityName, null);
+        await notifyUsers(notifyTargets, req.params.id, "priority_changed",
+          `[${ticket.reference_no}] Priority changed from ${ticket.priority_name} to ${newPriorityName} by ${req.user.full_name}`);
+      }
       fields.push("priority_id = ?"); vals.push(priority_id);
     }
 
@@ -464,7 +516,11 @@ router.put("/:id", async (req, res) => {
 
     if (due_date && ["IT Support Agent","Manager","Admin"].includes(role)) {
       const oldDue = ticket.due_date ? ticket.due_date.toISOString().split("T")[0] : null;
-      if (due_date !== oldDue) await logHistory(req.params.id, req.user.id, "FIELD_CHANGED", "due_date", oldDue, due_date, null);
+      if (due_date !== oldDue) {
+        await logHistory(req.params.id, req.user.id, "FIELD_CHANGED", "due_date", oldDue, due_date, null);
+        await notifyUsers(notifyTargets, req.params.id, "due_date_changed",
+          `[${ticket.reference_no}] Due date updated to ${due_date} by ${req.user.full_name}`);
+      }
       fields.push("due_date = ?"); vals.push(due_date);
     }
 
@@ -483,6 +539,12 @@ router.put("/:id", async (req, res) => {
         await logHistory(req.params.id, req.user.id, "ASSIGNED", "assigned_to",
           ticket.assigned_to_name || "Unassigned", newAssigneeName, req.body.note || null);
 
+        // Notify the new assignee directly, plus everyone else (creator/staff), excluding the actor.
+        const assignTargets = new Set(notifyTargets);
+        if (newAssignee !== req.user.id) assignTargets.add(newAssignee);
+        await notifyUsers([...assignTargets], req.params.id, "ticket_assigned",
+          `[${ticket.reference_no}] Assigned to ${newAssigneeName} by ${req.user.full_name}`);
+
         const [curStatus] = await db.query(
           "SELECT name FROM statuses s JOIN tickets t ON t.status_id=s.id WHERE t.id=?", [req.params.id]);
         if (curStatus[0]?.name === "Open") {
@@ -492,6 +554,8 @@ router.put("/:id", async (req, res) => {
       } else {
         await logHistory(req.params.id, req.user.id, "UNASSIGNED", "assigned_to",
           ticket.assigned_to_name || "Unknown", "Unassigned", null);
+        await notifyUsers(notifyTargets, req.params.id, "ticket_assigned",
+          `[${ticket.reference_no}] Unassigned by ${req.user.full_name}`);
       }
     }
 
@@ -573,7 +637,10 @@ router.post("/:id/comments",
       const role = req.user.role;
       const internal = role !== "Employee" ? is_internal : false;
 
-      const [ticket] = await db.query("SELECT id FROM tickets WHERE id = ?", [req.params.id]);
+      const [ticket] = await db.query(
+        "SELECT id, reference_no, created_by FROM tickets WHERE id = ?",
+        [req.params.id]
+      );
       if (ticket.length === 0)
         return res.status(404).json({ success: false, message: "Ticket not found" });
 
@@ -586,6 +653,18 @@ router.post("/:id/comments",
       await logHistory(req.params.id, req.user.id,
         internal ? "INTERNAL_NOTE_ADDED" : "COMMENT_ADDED",
         null, null, commentBody.substring(0, 200), internal ? "Internal note" : null);
+
+      // Notify relevant people. Internal notes never go to the ticket creator
+      // unless they're staff (Employees can't see internal notes at all).
+      let targets = await getNotifyTargets(req.params.id, req.user.id);
+      if (internal) {
+        targets = targets.filter(id => id !== ticket[0].created_by || ["Admin", "Manager", "IT Support Agent"].includes(role));
+      }
+      const notifyMsg = internal
+        ? `[${ticket[0].reference_no}] ${req.user.full_name} added an internal note`
+        : `[${ticket[0].reference_no}] ${req.user.full_name}: "${commentBody.substring(0, 100)}"`;
+      await notifyUsers(targets, req.params.id, "comment_added", notifyMsg);
+
 
       const [comment] = await db.query(
         `SELECT tc.*, u.full_name AS author_name
@@ -817,5 +896,121 @@ router.get("/ratings/summary", async (req, res) => {
     return res.status(500).json({ success: false, message: "Server error" });
   }
 });
+
+// ─── BULK ACTIONS (Agent / Manager / Admin only) ─────────────
+// body: { ticket_ids: [...], action: "assign" | "close", assigned_to?, note? }
+// Best-effort: processes each ticket independently and reports per-ticket results,
+// rather than rejecting the whole batch if one ticket fails permission/validation.
+router.post("/bulk",
+  authorizeRoles("IT Support Agent", "Manager", "Admin"),
+  [
+    body("ticket_ids").isArray({ min: 1 }).withMessage("ticket_ids must be a non-empty array"),
+    body("action").isIn(["assign", "close"]).withMessage("action must be 'assign' or 'close'"),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty())
+      return res.status(400).json({ success: false, errors: errors.array() });
+
+    const { ticket_ids, action, assigned_to, note } = req.body;
+    const role = req.user.role;
+
+    if (action === "assign" && !assigned_to) {
+      return res.status(400).json({ success: false, message: "assigned_to is required for the assign action" });
+    }
+
+    // Cap batch size to keep this reasonable
+    const ids = [...new Set(ticket_ids)].slice(0, 200);
+    const results = [];
+
+    for (const ticketId of ids) {
+      try {
+        const [rows] = await db.query(
+          `SELECT t.*, s.name AS status_name, assignee.full_name AS assigned_to_name
+           FROM tickets t
+           JOIN statuses s ON t.status_id = s.id
+           LEFT JOIN users assignee ON t.assigned_to = assignee.id
+           WHERE t.id = ?`,
+          [ticketId]
+        );
+
+        if (rows.length === 0) {
+          results.push({ ticket_id: ticketId, success: false, message: "Ticket not found" });
+          continue;
+        }
+
+        const ticket = rows[0];
+
+        // Agents can only bulk-act on tickets assigned to them, same as single-ticket PUT
+        if (role === "IT Support Agent" && ticket.assigned_to !== req.user.id) {
+          results.push({ ticket_id: ticketId, success: false, message: "Not assigned to you" });
+          continue;
+        }
+
+        if (action === "assign") {
+          await db.query("UPDATE tickets SET assigned_to = ? WHERE id = ?", [assigned_to, ticketId]);
+
+          await db.query(
+            `INSERT INTO ticket_assignments (id, ticket_id, assigned_to, assigned_by, assigned_at, note)
+             VALUES (UUID(), ?, ?, ?, NOW(), ?)`,
+            [ticketId, assigned_to, req.user.id, note || "Bulk assignment"]
+          );
+
+          const [uRows] = await db.query("SELECT full_name FROM users WHERE id = ?", [assigned_to]);
+          const newAssigneeName = uRows[0]?.full_name || assigned_to;
+          await logHistory(ticketId, req.user.id, "ASSIGNED", "assigned_to",
+            ticket.assigned_to_name || "Unassigned", newAssigneeName, note || "Bulk assignment");
+
+          const bulkAssignTargets = new Set(await getNotifyTargets(ticketId, req.user.id));
+          if (assigned_to !== req.user.id) bulkAssignTargets.add(assigned_to);
+          await notifyUsers([...bulkAssignTargets], ticketId, "ticket_assigned",
+            `[${ticket.reference_no}] Assigned to ${newAssigneeName} by ${req.user.full_name}`);
+
+          if (ticket.status_name === "Open") {
+            await db.query(
+              "UPDATE tickets SET status_id = (SELECT id FROM statuses WHERE name = 'In Progress' LIMIT 1) WHERE id = ?",
+              [ticketId]
+            );
+            await logHistory(ticketId, req.user.id, "STATUS_CHANGED", "status", "Open", "In Progress", "Auto-changed on bulk assignment");
+          }
+
+          results.push({ ticket_id: ticketId, success: true, message: `Assigned to ${newAssigneeName}` });
+        }
+
+        if (action === "close") {
+          if (ticket.status_name === "Resolved" || ticket.status_name === "Closed") {
+            results.push({ ticket_id: ticketId, success: false, message: `Already ${ticket.status_name}` });
+            continue;
+          }
+
+          await db.query(
+            "UPDATE tickets SET status_id = (SELECT id FROM statuses WHERE name = 'Resolved' LIMIT 1), resolved_at = NOW() WHERE id = ?",
+            [ticketId]
+          );
+          await logHistory(ticketId, req.user.id, "STATUS_CHANGED", "status", ticket.status_name, "Resolved", note || "Bulk close");
+          const bulkCloseTargets = await getNotifyTargets(ticketId, req.user.id);
+          await notifyUsers(bulkCloseTargets, ticketId, "status_changed",
+            `[${ticket.reference_no}] Status changed from ${ticket.status_name} to Resolved by ${req.user.full_name}`);
+
+          results.push({ ticket_id: ticketId, success: true, message: "Marked Resolved" });
+        }
+      } catch (err) {
+        console.error(`Bulk action error for ticket ${ticketId}:`, err);
+        results.push({ ticket_id: ticketId, success: false, message: "Server error" });
+      }
+    }
+
+    const succeeded = results.filter((r) => r.success).length;
+    const failed = results.length - succeeded;
+
+    await db.query(
+      `INSERT INTO activity_logs (id, user_id, action, new_value)
+       VALUES (UUID(), ?, 'BULK_ACTION', ?)`,
+      [req.user.id, JSON.stringify({ action, ticket_count: ids.length, succeeded, failed })]
+    );
+
+    return res.json({ success: true, results, succeeded, failed });
+  }
+);
 
 module.exports = router;

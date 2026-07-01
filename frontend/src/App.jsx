@@ -11,6 +11,8 @@ import TicketDetailPage   from "./pages/TicketDetailPage";
 import ManagerDashboard   from "./pages/ManagerDashboard";
 import TicketHistoryPage  from "./pages/TicketHistoryPage";
 import ActivityLogsPage   from "./pages/ActivityLogsPage";
+import KnowledgeBasePage  from "./pages/KnowledgeBasePage";
+import AnalyticsDashboard from "./pages/AnalyticsDashboard";
 import AIChatWidget       from "./components/AIChatWidget";
 
 function PrivateRoute({ children, roles }) {
@@ -50,7 +52,7 @@ export default function App() {
             <Route path="/dashboard" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
             <Route path="/tickets"   element={<PrivateRoute><TicketListPage /></PrivateRoute>} />
             <Route path="/tickets/new" element={
-              <PrivateRoute roles={["Employee","IT Support Agent","Admin"]}>
+              <PrivateRoute roles={["Employee","Admin"]}>
                 <CreateTicketPage />
               </PrivateRoute>
             } />
@@ -70,6 +72,8 @@ export default function App() {
                 <ActivityLogsPage />
               </PrivateRoute>
             } />
+            <Route path="/kb" element={<PrivateRoute><KnowledgeBasePage /></PrivateRoute>} />
+            <Route path="/analytics" element={<PrivateRoute><AnalyticsDashboard /></PrivateRoute>} />
             <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>
           <GlobalWidgets />

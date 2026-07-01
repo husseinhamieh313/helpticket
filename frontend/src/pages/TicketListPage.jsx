@@ -33,12 +33,18 @@ export default function TicketListPage() {
   const [loading,  setLoading]  = useState(true);
   const [search,   setSearch]   = useState("");
   const [filters,  setFilters]  = useState({ status:"", priority:"", category:"" });
-  const [meta,     setMeta]     = useState({ categories:[], priorities:[], statuses:[] });
+  const [meta,     setMeta]     = useState({ categories:[], priorities:[], statuses:[], agents:[] });
   const [deleting, setDeleting] = useState(null);
   const [slaOnly,  setSlaOnly]  = useState(false);
 
+  const [selected, setSelected] = useState(new Set());
+  const [bulkAgent, setBulkAgent] = useState("");
+  const [bulkRunning, setBulkRunning] = useState(false);
+  const [bulkResult, setBulkResult] = useState(null);
+
   const role = user?.role;
-  const canCreate = ["Employee","IT Support Agent","Admin"].includes(role);
+  const canCreate = ["Employee","Admin"].includes(role);
+  const canBulk = ["IT Support Agent","Manager","Admin"].includes(role);
   const canDelete = (t) =>
     role === "Admin" ||
     (role === "Employee" && t.created_by_id === user.id && t.status === "Open");
@@ -72,6 +78,47 @@ export default function TicketListPage() {
     } catch (e) {
       alert(e.response?.data?.message || "Delete failed");
     } finally { setDeleting(null); }
+  };
+
+  const toggleSelect = (id) => {
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = (ticketsInView) => {
+    setSelected(prev => {
+      const allSelected = ticketsInView.length > 0 && ticketsInView.every(t => prev.has(t.id));
+      if (allSelected) return new Set();
+      return new Set(ticketsInView.map(t => t.id));
+    });
+  };
+
+  const clearSelection = () => { setSelected(new Set()); setBulkResult(null); };
+
+  const runBulkAction = async (action) => {
+    if (selected.size === 0) return;
+    if (action === "assign" && !bulkAgent) { alert("Select an agent to assign to first"); return; }
+
+    setBulkRunning(true);
+    setBulkResult(null);
+    try {
+      const res = await api.post("/tickets/bulk", {
+        ticket_ids: [...selected],
+        action,
+        assigned_to: action === "assign" ? bulkAgent : undefined,
+      });
+      setBulkResult(res.data);
+      await fetchTickets();
+      setSelected(new Set());
+      setBulkAgent("");
+    } catch (e) {
+      alert(e.response?.data?.message || "Bulk action failed");
+    } finally {
+      setBulkRunning(false);
+    }
   };
 
   const pageTitle = () => {
@@ -140,6 +187,45 @@ export default function TicketListPage() {
         )}
       </div>
 
+      {/* Bulk action bar */}
+      {canBulk && selected.size > 0 && (
+        <div style={s.bulkBar}>
+          <span style={s.bulkCount}>{selected.size} selected</span>
+          <select style={s.bulkSelect} value={bulkAgent} onChange={e => setBulkAgent(e.target.value)}>
+            <option value="">Assign to agent...</option>
+            {meta.agents.map(a => (
+              <option key={a.id} value={a.id}>{a.full_name} ({a.active_tickets} active)</option>
+            ))}
+          </select>
+          <button style={s.bulkBtn} disabled={!bulkAgent || bulkRunning} onClick={() => runBulkAction("assign")}>
+            {bulkRunning ? "Working..." : "Assign"}
+          </button>
+          <button style={{ ...s.bulkBtn, background:"rgba(34,197,94,.15)", color:"#22c55e", border:"1px solid rgba(34,197,94,.3)" }}
+            disabled={bulkRunning} onClick={() => runBulkAction("close")}>
+            {bulkRunning ? "Working..." : "✓ Close / Resolve"}
+          </button>
+          <button style={s.bulkClearBtn} onClick={clearSelection}>Clear selection</button>
+        </div>
+      )}
+
+      {/* Bulk action result summary */}
+      {bulkResult && (
+        <div style={bulkResult.failed > 0 ? s.bulkResultWarn : s.bulkResultOk}>
+          <div style={{ fontWeight:700, marginBottom: bulkResult.failed > 0 ? 6 : 0 }}>
+            {bulkResult.succeeded} succeeded{bulkResult.failed > 0 ? `, ${bulkResult.failed} failed` : ""}
+          </div>
+          {bulkResult.failed > 0 && (
+            <div style={{ fontSize:11, lineHeight:1.6 }}>
+              {bulkResult.results.filter(r => !r.success).map(r => {
+                const t = tickets.find(tk => tk.id === r.ticket_id);
+                return <div key={r.ticket_id}>{t?.reference_no || r.ticket_id}: {r.message}</div>;
+              })}
+            </div>
+          )}
+          <button style={s.dismissBtn} onClick={() => setBulkResult(null)}>Dismiss</button>
+        </div>
+      )}
+
       {/* Table */}
       <div style={s.tableWrap}>
         {loading ? (
@@ -164,6 +250,14 @@ export default function TicketListPage() {
           <table style={s.table}>
             <thead>
               <tr>
+                {canBulk && (
+                  <th style={{ ...s.th, width:36 }}>
+                    <input type="checkbox"
+                      checked={visibleTickets.length > 0 && visibleTickets.every(t => selected.has(t.id))}
+                      onChange={() => toggleSelectAll(visibleTickets)}
+                      style={{ accentColor:"#3b82f6", cursor:"pointer" }} />
+                  </th>
+                )}
                 {["Ref", "Title", "Category", "Priority", "Status", "Assigned to", "Created", ""].map(h => (
                   <th key={h} style={s.th}>{h}</th>
                 ))}
@@ -171,10 +265,16 @@ export default function TicketListPage() {
             </thead>
             <tbody>
               {visibleTickets.map(t => (
-                <tr key={t.id} style={{ ...s.tr, ...(t.is_breached ? s.trBreached : {}) }}
+                <tr key={t.id} style={{ ...s.tr, ...(t.is_breached ? s.trBreached : {}), ...(selected.has(t.id) ? s.trSelected : {}) }}
                   onClick={() => navigate(`/tickets/${t.id}`)}
                   onMouseEnter={e => e.currentTarget.style.background = "#1e1e2e"}
-                  onMouseLeave={e => e.currentTarget.style.background = t.is_breached ? "rgba(239,68,68,.04)" : "transparent"}>
+                  onMouseLeave={e => e.currentTarget.style.background = selected.has(t.id) ? "rgba(59,130,246,.06)" : (t.is_breached ? "rgba(239,68,68,.04)" : "transparent")}>
+                  {canBulk && (
+                    <td style={s.td} onClick={e => e.stopPropagation()}>
+                      <input type="checkbox" checked={selected.has(t.id)} onChange={() => toggleSelect(t.id)}
+                        style={{ accentColor:"#3b82f6", cursor:"pointer" }} />
+                    </td>
+                  )}
                   <td style={s.td}>
                     <span style={{ fontFamily:"monospace", fontSize:11, color:"#3b82f6", fontWeight:700 }}>
                       {t.reference_no}
@@ -238,6 +338,21 @@ const s = {
     border:"1px solid rgba(239,68,68,.25)", borderRadius:10, padding:"11px 16px", marginBottom:16,
     cursor:"pointer", color:"#fca5a5", fontSize:13 },
   slaToggleHint: { marginLeft:"auto", fontSize:11, color:"#ef4444", opacity:0.8 },
+  bulkBar:    { display:"flex", alignItems:"center", gap:10, background:"rgba(59,130,246,.08)",
+    border:"1px solid rgba(59,130,246,.25)", borderRadius:10, padding:"10px 14px", marginBottom:14, flexWrap:"wrap" },
+  bulkCount:  { fontSize:12, fontWeight:700, color:"#93c5fd", marginRight:4 },
+  bulkSelect: { background:"#16161f", border:"1px solid #2a2a3a", borderRadius:8, padding:"7px 10px",
+    color:"#c0c0d0", fontSize:12, outline:"none", fontFamily:"inherit" },
+  bulkBtn:    { background:"rgba(59,130,246,.15)", border:"1px solid rgba(59,130,246,.3)", borderRadius:8,
+    padding:"7px 14px", color:"#93c5fd", fontSize:12, fontWeight:600, cursor:"pointer", fontFamily:"inherit" },
+  bulkClearBtn: { background:"none", border:"none", color:"#5555aa", fontSize:12, cursor:"pointer",
+    marginLeft:"auto", fontFamily:"inherit" },
+  bulkResultOk: { background:"rgba(34,197,94,.1)", border:"1px solid rgba(34,197,94,.25)", borderRadius:8,
+    padding:"10px 14px", color:"#86efac", fontSize:12, marginBottom:14 },
+  bulkResultWarn: { background:"rgba(245,158,11,.1)", border:"1px solid rgba(245,158,11,.25)", borderRadius:8,
+    padding:"10px 14px", color:"#fcd34d", fontSize:12, marginBottom:14 },
+  dismissBtn: { marginTop:8, background:"rgba(255,255,255,0.08)", border:"none", borderRadius:6,
+    padding:"4px 11px", color:"inherit", fontSize:11, cursor:"pointer" },
   filterRow:  { display:"flex", gap:10, marginBottom:18, flexWrap:"wrap" },
   search:     { flex:1, minWidth:200, background:"#16161f", border:"1px solid #2a2a3a", borderRadius:9,
     padding:"9px 14px", color:"#e0e0f0", fontSize:13, outline:"none", fontFamily:"inherit" },
@@ -251,6 +366,7 @@ const s = {
     letterSpacing:".06em", padding:"12px 14px", borderBottom:"1px solid rgba(255,255,255,0.06)" },
   tr:         { cursor:"pointer", transition:"background .12s" },
   trBreached: { background:"rgba(239,68,68,.04)" },
+  trSelected: { background:"rgba(59,130,246,.06)" },
   td:         { padding:"11px 14px", borderBottom:"1px solid rgba(255,255,255,0.04)", verticalAlign:"middle" },
   catBadge:   { fontSize:11, color:"#8888bb", background:"rgba(255,255,255,0.06)", padding:"2px 8px", borderRadius:6 },
   iconBtn:    { background:"none", border:"none", cursor:"pointer", fontSize:14, padding:"3px 5px", borderRadius:6, lineHeight:1 },
